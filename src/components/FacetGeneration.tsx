@@ -17,6 +17,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
   const [projectName, setProjectName] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedFacets, setGeneratedFacets] = useState<RecommendedFacet[]>([]);
+  const [groupedFacets, setGroupedFacets] = useState<{ [categoryId: string]: RecommendedFacet[] }>({});
   const [jobId, setJobId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -78,6 +79,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
 
     setIsGenerating(true);
     try {
+      
       const { data: job, error: jobError } = await supabase
         .from('facet_generation_jobs')
         .insert({
@@ -117,8 +119,18 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
         .select('*')
         .eq('job_id', job.id)
         .order('sort_order');
-
-      setGeneratedFacets((facets as RecommendedFacet[]) || []);
+      const fetchedFacets = (facets as RecommendedFacet[]) || [];
+       setGeneratedFacets(fetchedFacets); 
+      const categoryMap = new Map(categories.map(c => [c.id, c.name]));
+        const grouped = fetchedFacets.reduce((acc, facet) => {
+        const categoryId = facet.category_id;
+        if (!acc[categoryId]) {
+          acc[categoryId] = [];
+        }
+        acc[categoryId].push(facet);
+        return acc;
+      }, {} as { [categoryId: string]: RecommendedFacet[] });
+            setGroupedFacets(grouped);
 
       await supabase
         .from('facet_generation_jobs')
@@ -138,7 +150,27 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
 
   const exportFacets = async () => {
     if (!jobId) return;
-
+      const categoryMap = new Map(categories.map(c => [c.id, c.name]));
+ const csvRows = [
+    // Add "Category Name" to the header
+    'Category Name,Facet Name,Possible Values,Priority,Confidence Score,Filling %',
+    ...generatedFacets.map(f => {
+      // Get the category name from the map
+      const categoryName = categoryMap.get(f.category_id) || 'Unknown Category';
+      // Escape commas and quotes in values
+      const safeValues = `"${(f.possible_values || '').replace(/"/g, '""')}"`;
+      const safeFacetName = `"${(f.facet_name || '').replace(/"/g, '""')}"`;
+      
+      return [
+        `"${categoryName}"`,
+        safeFacetName,
+        safeValues,
+        f.priority,
+        f.confidence_score,
+        f.filling_percentage
+      ].join(',');
+    })
+  ];
     const { data: facets } = await supabase
       .from('recommended_facets')
       .select('*')
@@ -147,10 +179,8 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
 
     if (!facets) return;
 
-    const csv = [
-      'Category,Facet Name,Possible Values,Priority,Confidence Score,Filling %',
-      ...facets.map(f => `"${f.category_id}","${f.facet_name}","${f.possible_values}","${f.priority}",${f.confidence_score},${f.filling_percentage}`)
-    ].join('\n');
+      const csv = csvRows.join('\n');
+
 
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -169,6 +199,8 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
   };
 
   if (generatedFacets.length > 0) {
+      const categoryMap = new Map(categories.map(c => [c.id, c.name]));
+
     return (
       <div>
         <h2 className="text-2xl font-bold text-slate-900 mb-6">Generated Facets</h2>
@@ -201,59 +233,69 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
           </div>
         </div>
 
-        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                  Facet Name
-                </th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                  Possible Values
-                </th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                  Priority
-                </th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                  Confidence
-                </th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                  Filling %
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200">
-              {generatedFacets.map((facet) => (
-                <tr key={facet.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4 text-sm font-medium text-slate-900">
-                    {facet.facet_name}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-slate-600 max-w-md truncate">
-                    {facet.possible_values}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      facet.priority === 'High' ? 'bg-red-100 text-red-700' :
-                      facet.priority === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-green-100 text-green-700'
-                    }`}>
-                      {facet.priority}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-slate-600">
-                    {facet.confidence_score}/10
-                  </td>
-                  <td className="px-6 py-4 text-sm text-slate-600">
-                    {facet.filling_percentage}%
-                  </td>
+       <div className="space-y-8">
+        {Object.entries(groupedFacets).map(([categoryId, facetsForCategory]) => (
+          <div key={categoryId} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
+              <h4 className="text-lg font-semibold text-slate-900">
+                {categoryMap.get(categoryId) || 'Unknown Category'}
+              </h4>
+              <p className="text-sm text-slate-600">{facetsForCategory.length} facets</p>
+            </div>
+            <table className="w-full">
+              <thead className="border-b border-slate-200">
+                <tr>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                    Facet Name
+                  </th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                    Possible Values
+                  </th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                    Priority
+                  </th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                    Confidence
+                  </th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                    Filling %
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {facetsForCategory.map((facet) => (
+                  <tr key={facet.id} className="hover:bg-slate-50">
+                    <td className="px-6 py-4 text-sm font-medium text-slate-900">
+                      {facet.facet_name}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-600 max-w-md truncate">
+                      {facet.possible_values}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        facet.priority === 'High' ? 'bg-red-100 text-red-700' :
+                        facet.priority === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-green-100 text-green-700'
+                      }`}>
+                        {facet.priority}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-600">
+                      {facet.confidence_score}/10
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-600">
+                      {facet.filling_percentage}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
       </div>
-    );
-  }
+    </div>
+  );
+}
 
   return (
     <div>
