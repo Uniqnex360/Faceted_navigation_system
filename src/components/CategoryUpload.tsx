@@ -91,19 +91,22 @@ export default function CategoryUpload() {
     }
   };
 
-  const downloadTemplate = () => {
-    const template = 'Category Path,Level,Description\n' +
-      'Marine Safety Equipment > Personal Flotation > Life Jackets,3,End category\n' +
-      'Marine Safety Equipment > Personal Flotation > Life Vests,3,End category\n' +
-      'Marine Safety Equipment > Fire Safety > Fire Extinguishers,3,End category';
+const downloadTemplate = () => {
+  const template = `industry_name,level-1,level-2,level-3,level-4,level-5,level-6,level-7,level-8,level-9,level-10,bread_crumbs,end_category
+"Marine","Marine Electronics","Gps Chart Plotters","Chart Plotters - Multi Function","","","","","","","","Marine Electronics > Gps Chart Plotters > Chart Plotters - Multi Function","Chart Plotters - Multi Function"
+"Hardware","Tools","Power Tools","Drills & Drivers","Cordless Pistol-Grip Drills","","","","","","","Power Tools > Drills & Drivers > Cordless Pistol-Grip Drills","Cordless Pistol-Grip Drills"
+"Marine","Kayaks & Watersports","Sup Paddle Boards","Jobe & Red Paddle Sups At Best Prices","","","","","","","","Kayaks & Watersports > Sup Paddle Boards > Jobe & Red Paddle Sups At Best Prices","Jobe & Red Paddle Sups At Best Prices"
+`;
 
-    const blob = new Blob([template], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'category-upload-template.csv';
-    link.click();
-  };
+  const blob = new Blob([template], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'category-upload-template.csv';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
 
   return (
     <div>

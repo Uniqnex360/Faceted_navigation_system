@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FolderPlus, Trash2, Eye } from 'lucide-react';
+import { FolderPlus, Trash2, Eye, X, Calendar, BarChart, Tag, User } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { FacetGenerationJob } from '../types';
@@ -8,6 +8,8 @@ export default function ProjectManagement() {
   const { user } = useAuth();
   const [projects, setProjects] = useState<FacetGenerationJob[]>([]);
   const [projectName, setProjectName] = useState('');
+  const [selectedProject, setSelectedProject] = useState<FacetGenerationJob | null>(null);
+const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
@@ -143,7 +145,7 @@ export default function ProjectManagement() {
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
-                    <button className="p-1 text-blue-600 hover:bg-blue-50 rounded">
+                    <button  onClick={()=>{setSelectedProject(project);setIsDetailModalOpen(true)}}className="p-1 text-blue-600 hover:bg-blue-50 rounded">
                       <Eye className="w-4 h-4" />
                     </button>
                     <button
@@ -166,6 +168,116 @@ export default function ProjectManagement() {
           </tbody>
         </table>
       </div>
+      {isDetailModalOpen && selectedProject && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+        <h3 className="text-xl font-semibold text-slate-900">
+          Project Details: {selectedProject.project_name}
+        </h3>
+        <button
+          onClick={() => {
+            setIsDetailModalOpen(false);
+            setSelectedProject(null);
+          }}
+          className="p-2 hover:bg-slate-100 rounded-lg"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+      
+      <div className="p-6">
+        <div className="space-y-6">
+          {/* Basic Info */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-slate-50 p-4 rounded-lg">
+              <div className="flex items-center gap-2 text-slate-600 mb-1">
+                <Calendar className="w-4 h-4" />
+                <span className="text-sm font-medium">Created At</span>
+              </div>
+              <p className="text-slate-900">
+                {new Date(selectedProject.created_at).toLocaleString()}
+              </p>
+            </div>
+            
+            <div className="bg-slate-50 p-4 rounded-lg">
+              <div className="flex items-center gap-2 text-slate-600 mb-1">
+                <BarChart className="w-4 h-4" />
+                <span className="text-sm font-medium">Status</span>
+              </div>
+              <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(selectedProject.status)}`}>
+                {selectedProject.status}
+              </span>
+            </div>
+            
+            <div className="bg-slate-50 p-4 rounded-lg">
+              <div className="flex items-center gap-2 text-slate-600 mb-1">
+                <Tag className="w-4 h-4" />
+                <span className="text-sm font-medium">Total Categories</span>
+              </div>
+              <p className="text-slate-900">{selectedProject.total_categories || 0}</p>
+            </div>
+            
+            <div className="bg-slate-50 p-4 rounded-lg">
+              <div className="flex items-center gap-2 text-slate-600 mb-1">
+                <User className="w-4 h-4" />
+                <span className="text-sm font-medium">Created By</span>
+              </div>
+              <p className="text-slate-900">{selectedProject.created_by || "N/A"}</p>
+            </div>
+          </div>
+          
+          {/* Progress */}
+          <div>
+            <h4 className="font-medium text-slate-900 mb-2">Progress</h4>
+            <div className="w-full bg-slate-200 rounded-full h-2.5">
+              <div 
+                className="bg-blue-600 h-2.5 rounded-full" 
+                style={{ width: `${selectedProject.progress || 0}%` }}
+              ></div>
+            </div>
+            <div className="flex justify-between mt-1">
+              <span className="text-sm text-slate-600">{selectedProject.progress || 0}% complete</span>
+              <span className="text-sm text-slate-600">
+                {(selectedProject.processed_items || 0)} / {(selectedProject.total_items || 0)} items
+              </span>
+            </div>
+          </div>
+          
+          {/* Error Details if failed */}
+          {selectedProject.status === 'failed' && selectedProject.error_message && (
+            <div>
+              <h4 className="font-medium text-red-700 mb-2">Error Details</h4>
+              <div className="bg-red-50 border border-red-200 p-4 rounded-lg">
+                <p className="text-sm text-red-700">{selectedProject.error_message}</p>
+              </div>
+            </div>
+          )}
+          
+          {/* Actions */}
+          <div className="flex gap-3 pt-4 border-t border-slate-200">
+            <button
+              onClick={() => {
+                setIsDetailModalOpen(false);
+                deleteProject(selectedProject.id);
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete Project
+            </button>
+            <button
+              onClick={() => setIsDetailModalOpen(false)}
+              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }
