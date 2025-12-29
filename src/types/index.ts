@@ -49,8 +49,9 @@ export interface PromptTemplate {
   name: string;
   level: number;
   type: string;
-  template_content: string;
+  template: string;
   variables: Record<string, any>;
+  metadata?: { [key: string]: any }; 
   is_active: boolean;
   execution_order: number;
   created_at: string;
@@ -60,6 +61,7 @@ export interface PromptTemplate {
 export interface FacetGenerationJob {
   id: string;
   client_id: string;
+  project_name?:string
   category_ids: string[];
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress: number;
