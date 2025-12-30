@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
-import { Edit2, History, Star, Save, Plus, Copy, X } from "lucide-react";
+import { Edit2, History, Star, Save, Plus, Copy, X } from 'lucide-react';
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { PromptTemplate } from "../types";
 import { geographyCountries } from "../utils/CountrySelector";
 import { PROMPT_EXECUTION_ORDER } from "../utils/PromptOrder";
-import { CountryTemplate } from "../types/index";
+
 export default function PromptManagement() {
   const { user } = useAuth();
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
@@ -20,6 +20,9 @@ export default function PromptManagement() {
   const [promptVersions, setPromptVersions] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [countryTemplates, setCountryTemplates] = useState<{
+    [key: string]: string;
+  }>({});
   const [error, setError] = useState<string | null>(null);
   const [marineLevels, setMarineLevels] = useState<string[]>(Array(5).fill(""));
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -28,13 +31,11 @@ export default function PromptManagement() {
     template: "",
     level: 1,
   });
-  const [dynamicCountryTemplates, setDynamicCountryTemplates] = useState<
-    CountryTemplate[]
-  >([]);
 
   useEffect(() => {
     loadPrompts();
   }, [user]);
+  // Add this new function inside your PromptManagement component
 
   const showHistory = async (prompt: PromptTemplate) => {
     if (!prompt) return;
@@ -47,7 +48,11 @@ export default function PromptManagement() {
       // Fetch versions and the email of the user who edited it
       const { data, error } = await supabase
         .from("prompt_versions")
-        .select("*")
+        .select(
+          `
+          *,
+        `
+        )
         .eq("prompt_template_id", prompt.id)
         .order("version", { ascending: false }); // Show newest first
 
@@ -65,7 +70,7 @@ export default function PromptManagement() {
     if (!user) return;
     setError(null);
 
-    const query = supabase.from("prompt_templates").select("*");
+    const query = supabase.from("prompt_templates").select("*").eq('is_active',true);
 
     if (user.role !== "admin") {
       query.or(`client_id.eq.${user.client_id},client_id.is.null`);
@@ -120,6 +125,7 @@ export default function PromptManagement() {
         .insert({
           name: newPrompt.name,
           template: newPrompt.template,
+          type: newPrompt.type,
           level: newPrompt.level,
           client_id: user.client_id,
           current_version: 1,
@@ -138,103 +144,55 @@ export default function PromptManagement() {
     }
   };
   const editPrompt = (prompt: PromptTemplate) => {
-    setDynamicCountryTemplates([]);
     setError(null);
     setSelectedPrompt(prompt);
     setEditContent(prompt.template);
     setChangeNotes("");
     setIsEditing(true);
+
+    // setCountryTemplates({});
     setMarineLevels(Array(5).fill(""));
 
-    if (prompt.name === "Geography") {
-      const initialTemplates =(prompt.metadata as any)?.country_templates || [];
-       const templatesWithIds = initialTemplates.map((t: Omit<CountryTemplate, 'id'>) => ({
-        ...t,
-        id: Math.random().toString(36).substring(2, 9),
-      }));
-      setDynamicCountryTemplates(templatesWithIds);
-       setEditContent(''); 
-    } else if (prompt.name === "Industry Keywords") {
-      const initialLevels = (prompt.metadata as any)?.marine_levels || [];
-      const paddedLevels = Array(5)
-        .fill("")
-        .map((_, i) => initialLevels[i] || "");
-      setMarineLevels(paddedLevels);
-    }
+    // if (prompt.name === "Geography") {
+    //   const initialTemplates =
+    //     (prompt.metadata as any)?.country_templates || {};
+    //   const fullTemplates = geographyCountries.reduce((acc, country) => {
+    //     acc[country] = initialTemplates[country] || "";
+    //     return acc;
+    //   }, {} as { [key: string]: string });
+    //   setCountryTemplates(fullTemplates);
+    // } else 
+    // if (prompt.name === "Industry Keywords") {
+    //   const initialLevels = (prompt.metadata as any)?.marine_levels || [];
+    //   const paddedLevels = Array(5)
+    //     .fill("")
+    //     .map((_, i) => initialLevels[i] || "");
+    //   setMarineLevels(paddedLevels);
+    // }
   };
-  const handleDynamicCountryTemplateChange = (
-    id: string,
-    newTemplate: string
-  ) => {
-    setDynamicCountryTemplates((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, template: newTemplate } : t))
-    );
+  const handleCountryTemplateChange = (country: string, value: string) => {
+    setCountryTemplates((prev) => ({
+      ...prev,
+      [country]: value,
+    }));
   };
   const handleMarineLevelChange = (index: number, value: string) => {
     const newLevels = [...marineLevels];
     newLevels[index] = value;
     setMarineLevels(newLevels);
   };
-  const handleAddCountry = () => {
-    // Find the first available country that hasn't been added yet
-    const existingCountries = new Set(
-      dynamicCountryTemplates.map((t) => t.country)
-    );
-    const nextCountry = geographyCountries.find(
-      (c) => !existingCountries.has(c)
-    );
 
-    if (nextCountry) {
-      setDynamicCountryTemplates((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString(36).substring(2, 9),
-          country: nextCountry,
-          template: "",
-        },
-      ]);
-    } else {
-      alert("All available countries have been added.");
-    }
-  };
-
-  const handleRemoveCountry = (id: string) => {
-    setDynamicCountryTemplates((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  const handleCountryNameChange = (id: string, newCountry: string) => {
-    setDynamicCountryTemplates((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, country: newCountry } : t))
-    );
-  };
   const savePromptVersion = async () => {
     if (!selectedPrompt || !user) return;
     setError(null);
-     if (selectedPrompt.name === "Geography") {
-      // 1. Check if there are any country templates at all
-      if (dynamicCountryTemplates.length === 0) {
-        setError("For Geography prompts, you must add at least one country template.");
-        return; // Stop the save process
-      }
-
-      // 2. Check if every added country has content in its template
-      const hasEmptyTemplate = dynamicCountryTemplates.some(
-        (t) => t.template.trim() === ""
-      );
-      if (hasEmptyTemplate) {
-        setError("All added country templates must have content. Please fill in or remove empty templates.");
-        return; // Stop the save process
-      }
-    }
     setIsSaving(true);
     try {
       const newVersion = (selectedPrompt.current_version || 1) + 1;
 
       let versionContent = editContent;
-      if (selectedPrompt.name === "Geography") {
-        const templatesForHistory = dynamicCountryTemplates.map(({ id, ...rest }) => rest);
-        versionContent = JSON.stringify(templatesForHistory, null, 2);
-      }
+      // if (selectedPrompt.name === "Geography") {
+      //   versionContent = JSON.stringify(countryTemplates, null, 2);
+      // }
 
       await supabase.from("prompt_versions").insert({
         prompt_template_id: selectedPrompt.id,
@@ -259,21 +217,22 @@ export default function PromptManagement() {
         metadata: selectedPrompt.metadata || {},
       };
 
-      if (selectedPrompt.name === "Geography") {
-        const templatesToSave = dynamicCountryTemplates.map(
-          ({ id, ...rest }) => rest
-        );
+      // if (selectedPrompt.name === "Geography") {
+      //   const templatesToSave = Object.fromEntries(
+      //     Object.entries(countryTemplates).filter(
+      //       ([_, content]) => content.trim() !== ""
+      //     )
+      //   );
+      //   templateUpdate.metadata.country_templates = templatesToSave;
+      //   templateUpdate.template =
+      //     "This prompt uses country-specific templates stored in metadata.";
+      // }
 
-        templateUpdate.metadata.country_templates = templatesToSave;
-        templateUpdate.template =
-          "This prompt uses country-specific templates stored in metadata.";
-      }
-
-      if (selectedPrompt.name === "Industry Keywords") {
-        templateUpdate.metadata.marine_levels = marineLevels.filter(
-          (level) => level.trim() !== ""
-        );
-      }
+      // if (selectedPrompt.name === "Industry Keywords") {
+      //   templateUpdate.metadata.marine_levels = marineLevels.filter(
+      //     (level) => level.trim() !== ""
+      //   );
+      // }
 
       const { error: templateUpdateError } = await supabase
         .from("prompt_templates")
@@ -328,17 +287,14 @@ export default function PromptManagement() {
         <h2 className="text-2xl font-bold text-slate-900">
           Prompt Template Management
         </h2>
-        {!isEditing && (
-<button
+        <button
           onClick={() => setIsCreateModalOpen(true)}
           className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
           <Plus className="w-5 h-5" />
           New Prompt
         </button>
-        )}
-        
-      </div>
+      </div> 
       {isEditing && selectedPrompt ? (
         <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
           <h3 className="font-semibold text-slate-900 mb-4">
@@ -346,7 +302,7 @@ export default function PromptManagement() {
           </h3>
 
           <div className="space-y-4">
-            {selectedPrompt.name !== "Geography" && (
+            {true && (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   {selectedPrompt.name === "Industry Keywords"
@@ -376,71 +332,52 @@ export default function PromptManagement() {
               </div>
             )}
 
-            {selectedPrompt.name === "Geography" && (
+            {/* {selectedPrompt.name === "Geography" && (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   Country-Specific Templates
                 </label>
-                <div className="space-y-4">
-                  {dynamicCountryTemplates.map((templateItem) => (
-                    <div
-                      key={templateItem.id}
-                      className="bg-slate-50 p-4 rounded-lg border border-slate-200"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        {/* Country Selector Dropdown */}
-                        <select
-                          value={templateItem.country}
-                          onChange={(e) =>
-                            handleCountryNameChange(
-                              templateItem.id,
-                              e.target.value
+                <div className="space-y-3">
+                  {geographyCountries.map((country) => (
+                    <div key={country}>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">
+                        {country}
+                      </label>
+                      <div className="relative">
+                        <button
+                          onClick={() =>
+                            copyText(
+                              countryTemplates[country] || "",
+                              `country-${country}`
                             )
                           }
-                          className="font-medium text-slate-800 bg-white border border-slate-300 rounded-md px-3 py-1"
+                          className="text-xs inline-flex items-center gap-1 text-slate-500 hover:text-slate-800"
                         >
-                          {/* Show all available countries plus the currently selected one */}
-                          {geographyCountries.map((c) => (
-                            <option key={c} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          onClick={() => handleRemoveCountry(templateItem.id)}
-                          className="p-1 text-red-500 hover:bg-red-50 rounded-full"
-                        >
-                          <X className="w-4 h-4" />
+                          <Copy className="w-3 h-3" /> Copy
                         </button>
+                        {copiedKey === `country-${country}` && (
+                          <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-slate-800 text-white text-xs rounded py-1 px-2">
+                            Copied!
+                          </span>
+                        )}
                       </div>
                       <textarea
-                        value={templateItem.template}
+                        value={countryTemplates[country] || ""}
                         onChange={(e) =>
-                          handleDynamicCountryTemplateChange(
-                            templateItem.id,
-                            e.target.value
-                          )
+                          handleCountryTemplateChange(country, e.target.value)
                         }
-                        rows={5}
-                        placeholder={`Enter template content for ${templateItem.country}...`}
-                        className="w-full px-4 py-2 border border-slate-300 rounded-lg font-mono text-sm"
+                        rows={4}
+                        placeholder={`Enter template content for ${country}...`}
+                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
                       />
                     </div>
                   ))}
-
-                  {/* Add New Country Button */}
-                  <button
-                    onClick={handleAddCountry}
-                    className="w-full text-center py-3 border-2 border-dashed border-slate-300 text-slate-500 rounded-lg hover:bg-slate-50 hover:border-slate-400"
-                  >
-                    + Add Country Template
-                  </button>
                 </div>
               </div>
-            )}
+            )} */}
 
             {/* UI for Marine Keywords (Levels 2-6) */}
-            {selectedPrompt.name === "Industry Keywords" && (
+            {/* {selectedPrompt.name === "Industry Keywords" && (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   Sub-Level Keywords (Levels 2-6)
@@ -479,7 +416,7 @@ export default function PromptManagement() {
                   ))}
                 </div>
               </div>
-            )}
+            )} */}
 
             {/* Change Notes and Save Buttons */}
             <div>
@@ -538,6 +475,9 @@ export default function PromptManagement() {
                   Level
                 </th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                  Type
+                </th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
                   Version
                 </th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
@@ -557,11 +497,11 @@ export default function PromptManagement() {
                   <td className="px-6 py-4 text-sm text-slate-600">
                     Level {prompt.level}
                   </td>
-                  {/* <td className="px-6 py-4">
+                  <td className="px-6 py-4">
                     <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
                       {prompt.type}
                     </span>
-                  </td> */}
+                  </td>
                   <td className="px-6 py-4 text-sm text-slate-600">
                     v{prompt.current_version || 1}
                   </td>
@@ -709,45 +649,30 @@ export default function PromptManagement() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-
+            
             <div className="p-6 overflow-y-auto">
               {isLoadingHistory ? (
                 <p className="text-center text-slate-500">Loading history...</p>
               ) : (
                 <div className="space-y-6">
                   {promptVersions.map((version, index) => (
-                    <div
-                      key={version.id}
-                      className="border border-slate-200 rounded-lg"
-                    >
+                    <div key={version.id} className="border border-slate-200 rounded-lg">
                       <div className="bg-slate-50 p-3 flex justify-between items-center text-sm border-b">
                         <div className="font-semibold">
                           Version {version.version}
-                          {index === 0 && (
-                            <span className="ml-2 text-xs font-medium bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
-                              Latest
-                            </span>
-                          )}
+                          {index === 0 && <span className="ml-2 text-xs font-medium bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Latest</span>}
                         </div>
                         <div className="text-slate-500">
-                          <span className="font-medium">By:</span>{" "}
-                          {version.users?.email || "Unknown User"} on{" "}
-                          {new Date(version.created_at).toLocaleString()}
+                          <span className="font-medium">By:</span> {version.users?.email || 'Unknown User'} on {new Date(version.created_at).toLocaleString()}
                         </div>
                       </div>
                       <div className="p-4 space-y-3">
                         <div>
-                          <h4 className="font-semibold text-slate-800 text-xs uppercase tracking-wider mb-1">
-                            Change Notes
-                          </h4>
-                          <p className="text-sm text-slate-700 italic">
-                            {version.change_notes || "No notes provided."}
-                          </p>
+                          <h4 className="font-semibold text-slate-800 text-xs uppercase tracking-wider mb-1">Change Notes</h4>
+                          <p className="text-sm text-slate-700 italic">{version.change_notes || 'No notes provided.'}</p>
                         </div>
-                        <div>
-                          <h4 className="font-semibold text-slate-800 text-xs uppercase tracking-wider mb-1">
-                            Template Content
-                          </h4>
+                         <div>
+                          <h4 className="font-semibold text-slate-800 text-xs uppercase tracking-wider mb-1">Template Content</h4>
                           <pre className="bg-slate-100 p-3 rounded-md text-xs font-mono whitespace-pre-wrap overflow-x-auto">
                             {version.template_content}
                           </pre>
@@ -755,11 +680,7 @@ export default function PromptManagement() {
                       </div>
                     </div>
                   ))}
-                  {promptVersions.length === 0 && (
-                    <p className="text-center text-slate-500">
-                      No version history found.
-                    </p>
-                  )}
+                  {promptVersions.length === 0 && <p className="text-center text-slate-500">No version history found.</p>}
                 </div>
               )}
             </div>
@@ -775,6 +696,8 @@ export default function PromptManagement() {
           </div>
         </div>
       )}
+
     </div>
   );
+    
 }

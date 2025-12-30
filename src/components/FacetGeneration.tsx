@@ -114,6 +114,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
         .from("prompt_templates")
         .select("*")
         .order("level")
+        .eq('is_active',true)
         .order("execution_order"),
     ]);
     const loadedPrompts = (promptsData.data as PromptTemplate[]) || [];
@@ -211,20 +212,20 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       setValidationError(null);
       for (const promptId of selectedPrompts) {
         const prompt = prompts.find((p) => p.id === promptId);
-        if (prompt?.name === "Geography") {
-          const configuredCountries =
-            (prompt.metadata as any)?.country_templates || [];
-          const selectedCountries = promptSubSelections[prompt.id] || new Set();
+        // if (prompt?.name === "Geography") {
+        //   const configuredCountries =
+        //     (prompt.metadata as any)?.country_templates || [];
+        //   const selectedCountries = promptSubSelections[prompt.id] || new Set();
 
-          // The new rule: if more than 1 country is available, at least 1 must be selected.
-          if (configuredCountries.length > 1 && selectedCountries.size === 0) {
-            const validationMessage =
-              "Please select at least one country for the Geography prompt.";
-            setValidationError(validationMessage);
-            setIsGenerating(false); // Stop the spinner
-            return; // Stop the entire function
-          }
-        }
+        //   // The new rule: if more than 1 country is available, at least 1 must be selected.
+        //   if (configuredCountries.length > 1 && selectedCountries.size === 0) {
+        //     const validationMessage =
+        //       "Please select at least one country for the Geography prompt.";
+        //     setValidationError(validationMessage);
+        //     setIsGenerating(false); // Stop the spinner
+        //     return; // Stop the entire function
+        //   }
+        // }
       }
       const selectedPromptObjects = prompts.filter((p) =>
         selectedPrompts.has(p.id)
@@ -245,39 +246,43 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
           let assembledContent: string | object | string[];
 
            if (prompt.name === "Industry Keywords") {
-              const level1Content = prompt.template || "";
-              const otherLevels = (prompt.metadata as any)?.marine_levels || [];
-              assembledContent = [level1Content, ...otherLevels].filter(Boolean);
-            } else if (prompt.name === "Geography") {
-              const countryTemplatesArray =
-                (prompt.metadata as any)?.country_templates || [];
-              if (countryTemplatesArray.length === 0) {
-                assembledContent = {};
-              } else {
-                // Convert the array of {country, template} to an object for easy lookup
-                const allCountryTemplates = Object.fromEntries(
-                  countryTemplatesArray.map((t: any) => [t.country, t.template])
-                );
+              // const level1Content = prompt.template || "";
+              // const otherLevels = (prompt.metadata as any)?.marine_levels || [];
+              // assembledContent = [level1Content, ...otherLevels].filter(Boolean);
+                assembledContent = prompt.template || "";
 
-                const selectedCountriesForJob = promptSubSelections[prompt.id] || new Set();
+            // } else if (prompt.name === "Geography") {
+            //   const countryTemplatesArray =
+            //     (prompt.metadata as any)?.country_templates || [];
+            //   if (countryTemplatesArray.length === 0) {
+            //     assembledContent = {};
+            //   } else {
+            //     // Convert the array of {country, template} to an object for easy lookup
+            //     const allCountryTemplates = Object.fromEntries(
+            //       countryTemplatesArray.map((t: any) => [t.country, t.template])
+            //     );
+
+            //     const selectedCountriesForJob = promptSubSelections[prompt.id] || new Set();
                 
-                // This rule requires a selection if more than 1 country is available
-                if (countryTemplatesArray.length > 1 && selectedCountriesForJob.size === 0) {
-                   // This case is handled by the validation loop before this map runs.
-                   // We can default to sending all, but validation is better.
-                   // For safety, we can default to sending an empty object here if validation somehow fails.
-                   assembledContent = {};
-                } else if (countryTemplatesArray.length === 1) {
-                    assembledContent = allCountryTemplates;
-                } else { // This means multiple countries are available AND a selection was made.
-                  assembledContent = Object.fromEntries(
-                    Object.entries(allCountryTemplates).filter(([country, _]) =>
-                      selectedCountriesForJob.has(country)
-                    )
-                  );
-                }
-              }
-            } else {
+            //     // This rule requires a selection if more than 1 country is available
+            //     if (countryTemplatesArray.length > 1 && selectedCountriesForJob.size === 0) {
+            //        // This case is handled by the validation loop before this map runs.
+            //        // We can default to sending all, but validation is better.
+            //        // For safety, we can default to sending an empty object here if validation somehow fails.
+            //        assembledContent = {};
+            //     } else if (countryTemplatesArray.length === 1) {
+            //         assembledContent = allCountryTemplates;
+            //     } else { // This means multiple countries are available AND a selection was made.
+            //       assembledContent = Object.fromEntries(
+            //         Object.entries(allCountryTemplates).filter(([country, _]) =>
+            //           selectedCountriesForJob.has(country)
+            //         )
+            //       );
+            //     }
+            //   }
+            // } 
+}
+            else {
               // This is the fallback for all other standard prompts
               assembledContent = prompt.template;
             }
@@ -690,7 +695,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
                   </div>
                 </button>
 
-                {prompt.name === "Geography" &&
+                {/* {prompt.name === "Geography" &&
                   selectedPrompts.has(prompt.id) &&
                   geographyCountriesFromPrompt.length > 0 && (
                     <div className="pl-8 pt-3 space-y-2">
@@ -718,7 +723,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
                         </button>
                       ))}
                     </div>
-                  )}
+                  )} */}
                 {/* --- END: NEW CONDITIONAL UI --- */}
               </div>
             ))}
