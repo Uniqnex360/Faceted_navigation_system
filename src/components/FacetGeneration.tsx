@@ -335,6 +335,9 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
           `Generation failed with status ${response.status}: ${errorBody}`
         );
       }
+      const responseData = await response.json();
+console.log('🎯 API RESPONSE:', responseData);
+
 
       const { data: facets } = await supabase
         .from("recommended_facets")

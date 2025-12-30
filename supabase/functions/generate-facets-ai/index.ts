@@ -79,7 +79,11 @@ ${promptTemplate}`;
   }
 
   const data = await response.json();
+  console.log("Full API Response:", JSON.stringify(data, null, 2));
+
   const content = data.choices[0].message.content;
+  console.log("Content:", data.content);
+ 
 
   // --- CHANGED: Simply parse and return the entire JSON object ---
   try {
@@ -328,7 +332,7 @@ for (const prompt of promptPayloads) {
       
       // Replace all context variables
       Object.entries(categoryContext).forEach(([key, value]) => {
-        template = template.replace(new RegExp(`{{${key}}}`, 'g'), value);
+         template = template.replace(new RegExp(`{{${key}}}`, 'g'), value);
       });
       
       // Add the SEO meta data from Stage 1
@@ -336,7 +340,9 @@ for (const prompt of promptPayloads) {
         const metaString = JSON.stringify(generatedContext['Industry_SEO_Meta'], null, 2);
         template = template.replace('{{Industry_SEO_Meta}}', metaString);
       }
-      
+       template = template.replace(/\$\{categoryName\}/g, category.name);
+  template = template.replace(/\$\{categoryPath\}/g, category.category_path || category.name);
+  template = template.replace(/\$\{stage1MetaResult\}/g, JSON.stringify(generatedContext['Industry_SEO_Meta'], null, 2));
       console.log(`--- STAGE 2 TEMPLATE FOR AI ---\n`, template);
       
       // Execute Master prompt to generate facets
