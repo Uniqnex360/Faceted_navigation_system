@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react';
-import { Settings, CheckSquare, Square, Play, Download } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
-import { Category, PromptTemplate, RecommendedFacet } from '../types';
+import { useState, useEffect, useMemo } from "react";
+import { Settings, CheckSquare, Square, Play, Download } from "lucide-react";
+import { supabase } from "../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
+import { Category, PromptTemplate, RecommendedFacet } from "../types";
+import { geographyCountries } from '../utils/CountrySelector';
+import { PROMPT_EXECUTION_ORDER } from '../utils/PromptOrder';
 
 interface FacetGenerationProps {
   onComplete: () => void;
@@ -12,32 +14,119 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
   const { user } = useAuth();
   const [categories, setCategories] = useState<Category[]>([]);
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
-  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
-  const [selectedPrompts, setSelectedPrompts] = useState<Set<string>>(new Set());
-  const [projectName, setProjectName] = useState('');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedFacets, setGeneratedFacets] = useState<RecommendedFacet[]>([]);
-  const [groupedFacets, setGroupedFacets] = useState<{ [categoryId: string]: RecommendedFacet[] }>({});
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(
+    new Set()
+  );
+  const [selectedPrompts, setSelectedPrompts] = useState<Set<string>>(
+    new Set()
+  );
 
+  const [projectName, setProjectName] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedFacets, setGeneratedFacets] = useState<RecommendedFacet[]>(
+    []
+  );
+  const [groupedFacets, setGroupedFacets] = useState<{
+    [categoryId: string]: RecommendedFacet[];
+  }>({});
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [promptSubSelections, setPromptSubSelections] = useState<{[promptId: string]: Set<string>;}>({});
+  const [selectedFacetsForExport, setSelectedFacetsForExport] = useState<{ [categoryId: string]: Set<string> }>({});
+  const geographyCountriesFromPrompt = useMemo(() => {
+    const geographyPrompt = prompts.find(p => p.name === 'Geography');
+    if (geographyPrompt && geographyPrompt.metadata?.country_templates) {
+      const countries = geographyPrompt.metadata.country_templates.map((t: any) => t.country);
+      return countries.length > 1 ? countries : [];
+    }
+    return geographyCountries; 
+  }, [prompts]);
   useEffect(() => {
     loadData();
   }, [user]);
 
+  const toggleFacetForExport = (categoryId: string, facetId: string) => {
+    setSelectedFacetsForExport(prev => {
+      const newSelections = { ...prev };
+      const categorySelections = new Set(newSelections[categoryId] || []);
+
+      if (categorySelections.has(facetId)) {
+        categorySelections.delete(facetId);
+      } else {
+        categorySelections.add(facetId);
+      }
+
+      newSelections[categoryId] = categorySelections;
+      return newSelections;
+    });
+  };
+
+  const toggleSelectAllForCategory = (categoryId: string, facetsInCategory: RecommendedFacet[]) => {
+    setSelectedFacetsForExport(prev => {
+      const newSelections = { ...prev };
+      const currentSelections = newSelections[categoryId] || new Set();
+      const allFacetIdsInThisCategory = facetsInCategory.map(f => f.id);
+
+      if (currentSelections.size === allFacetIdsInThisCategory.length) {
+        newSelections[categoryId] = new Set();
+      } else {
+        newSelections[categoryId] = new Set(allFacetIdsInThisCategory);
+      }
+      
+      return newSelections;
+    });
+  };
+  const totalSelectedForExport = Object.values(selectedFacetsForExport).reduce((sum, set) => sum + set.size, 0);
   const loadData = async () => {
     if (!user) return;
 
-    const clientFilter = user.role === 'admin' ? {} : { client_id: user.client_id };
+    const clientFilter =
+      user.role === "admin" ? {} : { client_id: user.client_id };
 
     const [categoriesData, promptsData] = await Promise.all([
-      supabase.from('categories').select('*').match(clientFilter).order('category_path'),
-      supabase.from('prompt_templates').select('*').order('level').order('execution_order'),
+      supabase
+        .from("categories")
+        .select("*")
+        .match(clientFilter)
+        .order("category_path"),
+      supabase
+        .from("prompt_templates")
+        .select("*")
+        .order("level")
+        .order("execution_order"),
     ]);
-
+    const loadedPrompts = (promptsData.data as PromptTemplate[]) || [];
+    const sortedPrompts=loadedPrompts.sort((a,b)=>{
+      const indexA=PROMPT_EXECUTION_ORDER.indexOf(a.name)
+      const indexB=PROMPT_EXECUTION_ORDER.indexOf(b.name)
+      const finalIndexA=indexA===-1?Infinity:indexA
+      const finalIndexB=indexB===-1?Infinity:indexB 
+      return finalIndexA-finalIndexB
+    })
     setCategories((categoriesData.data as Category[]) || []);
-    setPrompts((promptsData.data as PromptTemplate[]) || []);
+    setPrompts(loadedPrompts);
+      setSelectedPrompts(new Set(loadedPrompts.map(p => p.id)));
   };
 
+  const handlePromptSubSelectionChange = (
+    promptId: string,
+    subSelection: string
+  ) => {
+    setPromptSubSelections((prev) => {
+      const currentSelections = new Set(prev[promptId] || []);
+
+      if (currentSelections.has(subSelection)) {
+        currentSelections.delete(subSelection);
+      } else {
+        currentSelections.add(subSelection);
+      }
+
+      return {
+        ...prev,
+        [promptId]: currentSelections,
+      };
+    });
+  };
   const toggleCategory = (id: string) => {
     const newSelected = new Set(selectedCategories);
     if (newSelected.has(id)) {
@@ -52,6 +141,11 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
     const newSelected = new Set(selectedPrompts);
     if (newSelected.has(id)) {
       newSelected.delete(id);
+      setPromptSubSelections((prev) => {
+        const newSubSelections = { ...prev };
+        delete newSubSelections[id];
+        return newSubSelections;
+      });
     } else {
       newSelected.add(id);
     }
@@ -62,7 +156,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
     if (selectedCategories.size === categories.length) {
       setSelectedCategories(new Set());
     } else {
-      setSelectedCategories(new Set(categories.map(c => c.id)));
+      setSelectedCategories(new Set(categories.map((c) => c.id)));
     }
   };
 
@@ -70,7 +164,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
     if (selectedPrompts.size === prompts.length) {
       setSelectedPrompts(new Set());
     } else {
-      setSelectedPrompts(new Set(prompts.map(p => p.id)));
+      setSelectedPrompts(new Set(prompts.map((p) => p.id)));
     }
   };
 
@@ -78,16 +172,65 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
     if (!user || selectedCategories.size === 0) return;
 
     setIsGenerating(true);
+    setError(null);
     try {
-      
+
+      const selectedPromptObjects = prompts.filter(p => selectedPrompts.has(p.id));
+      selectedPromptObjects.sort((a, b) => {
+        const indexA = PROMPT_EXECUTION_ORDER.indexOf(a.name);
+        const indexB = PROMPT_EXECUTION_ORDER.indexOf(b.name);
+         const finalIndexA = indexA === -1 ? Infinity : indexA;
+        const finalIndexB = indexB === -1 ? Infinity : indexB;
+                return finalIndexA - finalIndexB;
+})
+      const promptsPayload =selectedPromptObjects
+        .map((prompt) => {
+          if (!prompt) {
+            return null;
+          }
+
+           let assembledContent: string | object | string[];
+
+          if (prompt.name === "Industry Keywords") {
+            const level1Content = prompt.template || "";
+            const otherLevels = (prompt.metadata as any)?.marine_levels || [];
+            assembledContent = [level1Content, ...otherLevels]
+              .filter(Boolean)
+          } else if (prompt.name === "Geography") {
+            const allCountryTemplates = (prompt.metadata as any)?.country_templates || {};
+            const selectedCountriesForJob = promptSubSelections[prompt.id] || new Set();
+             if (selectedCountriesForJob.size === 0) {
+           assembledContent = allCountryTemplates['General European'] ? { 'General European': allCountryTemplates['General European'] } : {};
+          // Option 2: Send nothing for this prompt if no sub-selection is made
+          // assembledContent = {}; 
+        } else {
+          // Filter the templates to include only the selected countries
+          assembledContent = Object.fromEntries(
+            Object.entries(allCountryTemplates).filter(([country, _]) => 
+              selectedCountriesForJob.has(country)
+            )
+          );
+        }
+          } else {
+            assembledContent = prompt.template;
+          }
+
+          return {
+            id: prompt.id,
+            name: prompt.name,
+            content: assembledContent,
+          };
+        })
+        .filter((p) => p !== null);
+
       const { data: job, error: jobError } = await supabase
-        .from('facet_generation_jobs')
+        .from("facet_generation_jobs")
         .insert({
           client_id: user.client_id || user.id,
           project_name: projectName,
           category_ids: Array.from(selectedCategories),
           selected_prompts: Array.from(selectedPrompts),
-          status: 'processing',
+          status: "processing",
           total_categories: selectedCategories.size,
           processed_categories: 0,
           created_by: user.id,
@@ -98,31 +241,38 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       if (jobError || !job) throw jobError;
       setJobId(job.id);
 
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-facets-ai`;
+      const apiUrl = `${
+        import.meta.env.VITE_SUPABASE_URL
+      }/functions/v1/generate-facets-ai`;
       const response = await fetch(apiUrl, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           job_id: job.id,
           category_ids: Array.from(selectedCategories),
-          prompt_ids: Array.from(selectedPrompts),
+          prompts: promptsPayload,
         }),
       });
 
-      if (!response.ok) throw new Error('Generation failed');
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(
+          `Generation failed with status ${response.status}: ${errorBody}`
+        );
+      }
 
       const { data: facets } = await supabase
-        .from('recommended_facets')
-        .select('*')
-        .eq('job_id', job.id)
-        .order('sort_order');
+        .from("recommended_facets")
+        .select("*")
+        .eq("job_id", job.id)
+        .order("sort_order");
       const fetchedFacets = (facets as RecommendedFacet[]) || [];
-       setGeneratedFacets(fetchedFacets); 
-      const categoryMap = new Map(categories.map(c => [c.id, c.name]));
-        const grouped = fetchedFacets.reduce((acc, facet) => {
+      setGeneratedFacets(fetchedFacets);
+      const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
+      const grouped = fetchedFacets.reduce((acc, facet) => {
         const categoryId = facet.category_id;
         if (!acc[categoryId]) {
           acc[categoryId] = [];
@@ -130,80 +280,94 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
         acc[categoryId].push(facet);
         return acc;
       }, {} as { [categoryId: string]: RecommendedFacet[] });
-            setGroupedFacets(grouped);
+      setGroupedFacets(grouped);
 
       await supabase
-        .from('facet_generation_jobs')
+        .from("facet_generation_jobs")
         .update({
-          status: 'completed',
+          status: "completed",
           progress: 100,
           processed_categories: selectedCategories.size,
           completed_at: new Date().toISOString(),
         })
-        .eq('id', job.id);
-    } catch (error) {
-      console.error('Error generating facets:', error);
+        .eq("id", job.id);
+    } catch (error: any) {
+      console.error("Error generating facets:", error);
+      setError(`Failed to generate facets: ${error.message}`);
+      if (jobId) {
+        await supabase
+          .from("facet_generation_jobs")
+          .update({ status: "failed" })
+          .eq("id", jobId);
+      }
     } finally {
       setIsGenerating(false);
     }
   };
 
+ // Replace the existing exportFacets function with this new version
+
   const exportFacets = async () => {
-    if (!jobId) return;
-      const categoryMap = new Map(categories.map(c => [c.id, c.name]));
- const csvRows = [
-    // Add "Category Name" to the header
-    'Category Name,Facet Name,Possible Values,Priority,Confidence Score,Filling %',
-    ...generatedFacets.map(f => {
-      // Get the category name from the map
-      const categoryName = categoryMap.get(f.category_id) || 'Unknown Category';
-      // Escape commas and quotes in values
-      const safeValues = `"${(f.possible_values || '').replace(/"/g, '""')}"`;
-      const safeFacetName = `"${(f.facet_name || '').replace(/"/g, '""')}"`;
-      
-      return [
-        `"${categoryName}"`,
-        safeFacetName,
-        safeValues,
-        f.priority,
-        f.confidence_score,
-        f.filling_percentage
-      ].join(',');
-    })
-  ];
-    const { data: facets } = await supabase
-      .from('recommended_facets')
-      .select('*')
-      .eq('job_id', jobId)
-      .order('sort_order');
+    // Flatten the selected IDs from all categories into a single Set
+    const allSelectedIds = new Set(
+      Object.values(selectedFacetsForExport).flatMap(set => Array.from(set))
+    );
 
-    if (!facets) return;
+    if (allSelectedIds.size === 0) {
+      console.log("No facets selected for export.");
+      return;
+    }
 
-      const csv = csvRows.join('\n');
+    // Filter the original generatedFacets array to get only the selected ones
+    const facetsToExport = generatedFacets.filter(facet => allSelectedIds.has(facet.id));
 
+    const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
+    
+    const csvRows = [
+      "Category Name,Facet Name,Possible Values,Priority,Confidence Score,Filling %",
+      ...facetsToExport.map((f) => { // <-- Use facetsToExport here
+        const categoryName = categoryMap.get(f.category_id) || "Unknown Category";
+        const safeValues = `"${(f.possible_values || "").replace(/"/g, '""')}"`;
+        const safeFacetName = `"${(f.facet_name || "").replace(/"/g, '""')}"`;
 
-    const blob = new Blob([csv], { type: 'text/csv' });
+        return [
+          `"${categoryName}"`,
+          safeFacetName,
+          safeValues,
+          f.priority,
+          f.confidence_score,
+          f.filling_percentage,
+        ].join(",");
+      }),
+    ];
+
+    const csv = csvRows.join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
+    const link = document.createElement("a");
     link.href = url;
-    link.download = `facets-${jobId}.csv`;
+    link.download = `facets-${projectName || jobId}.csv`;
     link.click();
+    URL.revokeObjectURL(url);
 
-    await supabase.from('export_history').insert({
+    // This part remains the same
+    await supabase.from("export_history").insert({
       client_id: user?.client_id || user?.id,
       job_id: jobId,
       category_ids: Array.from(selectedCategories),
-      format: 'csv',
+      format: "csv",
       exported_by: user?.id,
     });
   };
-
   if (generatedFacets.length > 0) {
-      const categoryMap = new Map(categories.map(c => [c.id, c.name]));
+    const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
 
     return (
       <div>
-        <h2 className="text-2xl font-bold text-slate-900 mb-6">Generated Facets</h2>
+        <h2 className="text-2xl font-bold text-slate-900 mb-6">
+          Generated Facets
+        </h2>
 
         <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
           <div className="flex items-center justify-between">
@@ -217,11 +381,12 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
             </div>
             <div className="flex gap-3">
               <button
+              disabled={totalSelectedForExport===0}
                 onClick={exportFacets}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Download className="w-4 h-4" />
-                Export
+                Export {totalSelectedForExport > 0 ? `(${totalSelectedForExport})` : ''}
               </button>
               <button
                 onClick={onComplete}
@@ -233,73 +398,102 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
           </div>
         </div>
 
-       <div className="space-y-8">
-        {Object.entries(groupedFacets).map(([categoryId, facetsForCategory]) => (
-          <div key={categoryId} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
-              <h4 className="text-lg font-semibold text-slate-900">
-                {categoryMap.get(categoryId) || 'Unknown Category'}
-              </h4>
-              <p className="text-sm text-slate-600">{facetsForCategory.length} facets</p>
-            </div>
-            <table className="w-full">
-              <thead className="border-b border-slate-200">
-                <tr>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                    Facet Name
+        <div className="space-y-8">
+          {Object.entries(groupedFacets).map(
+            ([categoryId, facetsForCategory]) => (
+              <div
+                key={categoryId}
+                className="bg-white rounded-lg border border-slate-200 overflow-hidden"
+              >
+                <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
+                  <h4 className="text-lg font-semibold text-slate-900">
+                    {categoryMap.get(categoryId) || "Unknown Category"}
+                  </h4>
+                  <p className="text-sm text-slate-600">
+                    {facetsForCategory.length} facets
+                  </p>
+                </div>
+                <table className="w-full">
+                  <thead className="border-b border-slate-200">
+                    <tr>
+                      <th className="px-4 py-3 w-12 text-left">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      checked={(selectedFacetsForExport[categoryId]?.size || 0) === facetsForCategory.length && facetsForCategory.length > 0}
+                      onChange={() => toggleSelectAllForCategory(categoryId, facetsForCategory)}
+                    />
                   </th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                    Possible Values
-                  </th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                    Priority
-                  </th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                    Confidence
-                  </th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                    Filling %
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200">
-                {facetsForCategory.map((facet) => (
-                  <tr key={facet.id} className="hover:bg-slate-50">
-                    <td className="px-6 py-4 text-sm font-medium text-slate-900">
-                      {facet.facet_name}
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                        Facet Name
+                      </th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                        Possible Values
+                      </th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                        Priority
+                      </th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                        Confidence
+                      </th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                        Filling %
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {facetsForCategory.map((facet) => (
+                      <tr key={facet.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-4">
+                       <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        checked={(selectedFacetsForExport[categoryId] || new Set()).has(facet.id)}
+                        onChange={() => toggleFacetForExport(categoryId, facet.id)}
+                      />
                     </td>
-                    <td className="px-6 py-4 text-sm text-slate-600 max-w-md truncate">
-                      {facet.possible_values}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        facet.priority === 'High' ? 'bg-red-100 text-red-700' :
-                        facet.priority === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
-                        'bg-green-100 text-green-700'
-                      }`}>
-                        {facet.priority}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-600">
-                      {facet.confidence_score}/10
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-600">
-                      {facet.filling_percentage}%
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ))}
+                        <td className="px-6 py-4 text-sm font-medium text-slate-900">
+                          {facet.facet_name}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-600 max-w-md truncate">
+                          {facet.possible_values}
+                        </td>
+                        <td className="px-6 py-4">
+                          <span
+                            className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              facet.priority === "High"
+                                ? "bg-red-100 text-red-700"
+                                : facet.priority === "Medium"
+                                ? "bg-yellow-100 text-yellow-700"
+                                : "bg-green-100 text-green-700"
+                            }`}
+                          >
+                            {facet.priority}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-600">
+                          {facet.confidence_score}/10
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-600">
+                          {facet.filling_percentage}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-slate-900 mb-6">Generate Facets</h2>
+      <h2 className="text-2xl font-bold text-slate-900 mb-6">
+        Generate Facets
+      </h2>
 
       <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
         <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -324,7 +518,9 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
               onClick={selectAllCategories}
               className="text-sm text-blue-600 hover:text-blue-700"
             >
-              {selectedCategories.size === categories.length ? 'Deselect All' : 'Select All'}
+              {selectedCategories.size === categories.length
+                ? "Deselect All"
+                : "Select All"}
             </button>
           </div>
 
@@ -367,36 +563,82 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
               onClick={selectAllPrompts}
               className="text-sm text-blue-600 hover:text-blue-700"
             >
-              {selectedPrompts.size === prompts.length ? 'Deselect All' : 'Select All'}
+              {selectedPrompts.size === prompts.length
+                ? "Deselect All"
+                : "Select All"}
             </button>
           </div>
-
           <div className="max-h-96 overflow-y-auto space-y-2">
             {prompts.map((prompt) => (
-              <button
+              <div
                 key={prompt.id}
-                onClick={() => togglePrompt(prompt.id)}
-                className="w-full flex items-center gap-3 p-3 hover:bg-slate-50 rounded-lg transition-colors text-left"
+                className="p-3 hover:bg-slate-50 rounded-lg transition-colors"
               >
-                {selectedPrompts.has(prompt.id) ? (
-                  <CheckSquare className="w-5 h-5 text-blue-600 flex-shrink-0" />
-                ) : (
-                  <Square className="w-5 h-5 text-slate-400 flex-shrink-0" />
-                )}
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-slate-900">
-                    {prompt.name}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Level {prompt.level} • {prompt.type}
-                  </p>
-                </div>
-              </button>
+                {/* Main Prompt Checkbox */}
+                <button
+                  onClick={() => togglePrompt(prompt.id)}
+                  className="w-full flex items-center gap-3 text-left"
+                >
+                  {selectedPrompts.has(prompt.id) ? (
+                    <CheckSquare className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                  ) : (
+                    <Square className="w-5 h-5 text-slate-400 flex-shrink-0" />
+                  )}
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-slate-900">
+                      {prompt.name}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Level {prompt.level} • {prompt.type}
+                    </p>
+                  </div>
+                </button>
+
+                {/* --- START: NEW CONDITIONAL UI FOR GEOGRAPHY --- */}
+                {prompt.name === "Geography" &&
+                  selectedPrompts.has(prompt.id) &&
+                  geographyCountriesFromPrompt.length > 0 &&  (
+                    <div className="pl-8 pt-3 space-y-2">
+                      <p className="text-xs font-semibold text-slate-600">
+                        Select countries to include:
+                      </p>
+                      {geographyCountries.map((country) => (
+                        <button
+                          key={country}
+                          onClick={() =>
+                            handlePromptSubSelectionChange(prompt.id, country)
+                          }
+                          className="w-full flex items-center gap-3 text-left"
+                        >
+                          {(promptSubSelections[prompt.id] || new Set()).has(
+                            country
+                          ) ? (
+                            <CheckSquare className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                          ) : (
+                            <Square className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                          )}
+                          <span className="text-sm text-slate-800">
+                            {country}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                {/* --- END: NEW CONDITIONAL UI --- */}
+              </div>
             ))}
           </div>
         </div>
       </div>
-
+      {error && (
+        <div
+          className="text-center bg-red-50 border border-red-200 text-sm text-red-700 px-4 py-3 rounded-lg mb-4 max-w-4xl mx-auto"
+          role="alert"
+        >
+          <strong className="font-bold">An error occurred: </strong>
+          <span>{error}</span>
+        </div>
+      )}
       <div className="flex justify-center">
         <button
           onClick={generateFacets}

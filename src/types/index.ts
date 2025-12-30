@@ -42,7 +42,11 @@ export interface ExistingFacet {
   source: string | null;
   created_at: string;
 }
-
+export interface CountryTemplate {
+  country: string;
+  template: string;
+  id: string; 
+}
 export interface PromptTemplate {
   id: string;
   client_id: string | null;
