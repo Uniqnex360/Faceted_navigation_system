@@ -210,6 +210,22 @@ export default function PromptManagement() {
   const savePromptVersion = async () => {
     if (!selectedPrompt || !user) return;
     setError(null);
+     if (selectedPrompt.name === "Geography") {
+      // 1. Check if there are any country templates at all
+      if (dynamicCountryTemplates.length === 0) {
+        setError("For Geography prompts, you must add at least one country template.");
+        return; // Stop the save process
+      }
+
+      // 2. Check if every added country has content in its template
+      const hasEmptyTemplate = dynamicCountryTemplates.some(
+        (t) => t.template.trim() === ""
+      );
+      if (hasEmptyTemplate) {
+        setError("All added country templates must have content. Please fill in or remove empty templates.");
+        return; // Stop the save process
+      }
+    }
     setIsSaving(true);
     try {
       const newVersion = (selectedPrompt.current_version || 1) + 1;

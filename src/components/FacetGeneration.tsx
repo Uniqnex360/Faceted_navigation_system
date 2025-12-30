@@ -39,17 +39,17 @@
     }>({});
     const geographyCountriesFromPrompt = useMemo(() => {
       const geographyPrompt = prompts.find((p) => p.name === "Geography");
-      // Check if the metadata and the country_templates array exist
+      // Check if the metadata and the country_templates array exist and are valid
       if (geographyPrompt && Array.isArray(geographyPrompt.metadata?.country_templates)) {
         // Get the list of configured countries
         const countries = geographyPrompt.metadata.country_templates.map(
           (t: any) => t.country
         );
-        // Only return the list if there's more than one country to choose from
+        // Only return the list if there is more than one country to choose from.
         return countries.length > 1 ? countries : [];
       }
-      // --- CORRECT FALLBACK ---
-      // If no countries are configured, return an empty array.
+      // --- THE FIX ---
+      // If no dynamic countries are configured, return an EMPTY array.
       return []; 
     }, [prompts]);
     useEffect(() => {
@@ -121,7 +121,7 @@
         return finalIndexA - finalIndexB;
       });
       setCategories((categoriesData.data as Category[]) || []);
-      setPrompts(loadedPrompts);
+      setPrompts(sortedPrompts);
       setSelectedPrompts(new Set(loadedPrompts.map((p) => p.id)));
     };
 
@@ -206,6 +206,11 @@
             if (!prompt) {
               return null;
             }
+        console.log("--- Sending Payload to Backend ---", {
+        job_id: job.id,
+        category_ids: Array.from(selectedCategories),
+        prompts: promptsPayload,
+      });
 
             let assembledContent: string | object | string[];
 
