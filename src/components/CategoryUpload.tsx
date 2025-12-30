@@ -39,7 +39,7 @@ export default function CategoryUpload() {
     });
   };
 
-  const uploadCategories = async () => {
+ const uploadCategories = async () => {
     if (!file || !user) return;
 
     setIsUploading(true);
@@ -48,11 +48,27 @@ export default function CategoryUpload() {
     try {
       const text = await file.text();
       const rows = parseCSV(text);
-      const headers = rows[0];
+      
+      if (rows.length < 2) {
+        throw new Error("CSV file is empty or only contains a header.");
+      }
+
+      const headers = rows[0].map(h => h.toLowerCase()); // Normalize headers
       const dataRows = rows.slice(1);
 
+      // --- START: NEW, ROBUST LOGIC ---
+      // 1. Find the index of the 'breadcrumbs' column.
+      const pathColumnIndex = headers.indexOf('breadcrumbs');
+      
+      if (pathColumnIndex === -1) {
+        throw new Error("CSV must contain a 'breadcrumbs' column.");
+      }
+      
       const categories = dataRows.map(row => {
-        const categoryPath = row[0] || '';
+        // 2. Use the correct index to get the category path.
+        const categoryPath = row[pathColumnIndex] || '';
+        
+        // This part of your logic is already correct
         const pathParts = categoryPath.split('>').map(p => p.trim());
         const level = pathParts.length;
         const name = pathParts[pathParts.length - 1] || '';
@@ -64,17 +80,20 @@ export default function CategoryUpload() {
           name,
           metadata: {},
         };
-      }).filter(cat => cat.name);
+      }).filter(cat => cat.name); // Filter out any rows that result in an empty name
+      // --- END: NEW, ROBUST LOGIC ---
 
       let success = 0;
       let failed = 0;
-
+      
+      // The rest of the function (looping and inserting) is correct.
       for (const category of categories) {
         const { error } = await supabase
           .from('categories')
           .insert(category);
 
         if (error) {
+          console.error("Failed to insert category:", category.name, error.message);
           failed++;
         } else {
           success++;
@@ -83,9 +102,11 @@ export default function CategoryUpload() {
 
       setUploadResult({ success, failed });
       setFile(null);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error uploading categories:', error);
-      setUploadResult({ success: 0, failed: 1 });
+      // Display the specific error to the user
+      alert(`Upload failed: ${error.message}`);
+      setUploadResult({ success: 0, failed: dataRows.length || 1 }); // Assume all failed
     } finally {
       setIsUploading(false);
     }
