@@ -31,9 +31,8 @@
     }>({});
     const [jobId, setJobId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [promptSubSelections, setPromptSubSelections] = useState<{
-      [promptId: string]: Set<string>;
-    }>({});
+    const [promptSubSelections, setPromptSubSelections] = useState<{[promptId: string]: Set<string>;}>({});
+    const [validationError, setValidationError] = useState<string | null>(null);
     const [selectedFacetsForExport, setSelectedFacetsForExport] = useState<{
       [categoryId: string]: Set<string>;
     }>({});
@@ -191,6 +190,22 @@
       setIsGenerating(true);
       setError(null);
       try {
+         setValidationError(null); 
+         for (const promptId of selectedPrompts) {
+          const prompt = prompts.find(p => p.id === promptId);
+          if (prompt?.name === 'Geography') {
+            const configuredCountries = (prompt.metadata as any)?.country_templates || [];
+            const selectedCountries = promptSubSelections[prompt.id] || new Set();
+
+            // The new rule: if more than 1 country is available, at least 1 must be selected.
+            if (configuredCountries.length > 1 && selectedCountries.size === 0) {
+              const validationMessage = "Please select at least one country for the Geography prompt.";
+              setValidationError(validationMessage);
+              setIsGenerating(false); // Stop the spinner
+              return; // Stop the entire function
+            }
+          }
+        }
         const selectedPromptObjects = prompts.filter((p) =>
           selectedPrompts.has(p.id)
         );
@@ -206,11 +221,7 @@
             if (!prompt) {
               return null;
             }
-        console.log("--- Sending Payload to Backend ---", {
-        job_id: job.id,
-        category_ids: Array.from(selectedCategories),
-        prompts: promptsPayload,
-      });
+       
 
             let assembledContent: string | object | string[];
 
@@ -394,6 +405,7 @@
         exported_by: user?.id,
       });
     };
+    
     if (generatedFacets.length > 0) {
       const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
 
@@ -618,6 +630,11 @@
                   : "Select All"}
               </button>
             </div>
+            {validationError && (
+             <div className="bg-yellow-50 border border-yellow-200 text-sm text-yellow-800 px-4 py-2 rounded-lg mb-4" role="alert">
+                {validationError}
+              </div>
+          )}
             <div className="max-h-96 overflow-y-auto space-y-2">
               {prompts.map((prompt) => (
                 <div
