@@ -424,7 +424,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
 
     // This part remains the same
     await supabase.from("export_history").insert({
-      client_id: user?.client_id || user?.id,
+      // client_id: user?.client_id || user?.id,
       job_id: jobId,
       category_ids: Array.from(selectedCategories),
       format: "csv",
