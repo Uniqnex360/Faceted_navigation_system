@@ -321,8 +321,8 @@ for (const prompt of promptPayloads) {
       console.log('  - Stage 1 completed: SEO meta data extracted');
       
     // STAGE 2: Master Prompt (Uses SEO data to generate facets)
-    } else if (prompt.name === 'Master' && typeof prompt.content === 'string') {
-      console.log('  - Starting Stage 2: Master prompt with SEO intelligence');
+    } else if (prompt.name === 'Output Format-1' && typeof prompt.content === 'string') {
+      console.log('  - Starting Stage 2: Output Format-1 prompt with SEO intelligence');
       
       let template = prompt.content as string;
       
