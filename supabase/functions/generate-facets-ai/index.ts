@@ -456,33 +456,50 @@ Deno.serve(async (req: Request) => {
 
               // NEW CODE: Check if we have enough facets, if not, request more
               // NEW CODE: Check if we have enough facets based on the prompt requirements
-let facets = aiResult.facets || [];
-console.log(`  - Initial facet generation: ${facets.length} facets`);
+              let facets = aiResult.facets || [];
+              console.log(`  - Initial facet generation: ${facets.length} facets`);
 
-// Extract the required facet count from the prompt
-let minFacets = 0; // Default to no minimum
-let maxFacets = 0; // Default to no maximum
-const facetCountMatch = template.match(/contain\s+(\d+)–(\d+)\s+filters/i) || 
-                        template.match(/contain\s+(\d+)-(\d+)\s+filters/i) ||
-                        template.match(/contain\s+(\d+)\s+filters/i);
+              // Extract the required facet count from the prompt
+              let minFacets = 0; // Default to no minimum
+              let maxFacets = 0; // Default to no maximum
+              const facetCountMatch = template.match(/contain\s+(\d+)–(\d+)\s+filters/i) ||
+                template.match(/contain\s+(\d+)-(\d+)\s+filters/i) ||
+                template.match(/contain\s+(\d+)\s+filters/i);
 
-if (facetCountMatch) {
-  if (facetCountMatch.length >= 3) {
-    // Range format: "contain X-Y filters"
-    minFacets = parseInt(facetCountMatch[1], 10);
-    maxFacets = parseInt(facetCountMatch[2], 10);
-  } else if (facetCountMatch.length >= 2) {
-    // Single number format: "contain X filters"
-    minFacets = parseInt(facetCountMatch[1], 10);
-    maxFacets = minFacets;
-  }
-}
-
-// Only request more facets if a minimum is specified and we don't have enough
-if (minFacets > 0 && Array.isArray(facets) && facets.length < minFacets) {
-  console.log(`  - Warning: Only ${facets.length} facets generated, requirement is ${minFacets}${maxFacets > minFacets ? `-${maxFacets}` : ''}, requesting more...`);
+              if (facetCountMatch) {
+                if (facetCountMatch.length >= 3) {
+                  // Range format: "contain X-Y filters"
+                  minFacets = parseInt(facetCountMatch[1], 10);
+                  maxFacets = parseInt(facetCountMatch[2], 10);
+                } else if (facetCountMatch.length >= 2) {
+                  // Single number format: "contain X filters"
+                  minFacets = parseInt(facetCountMatch[1], 10);
+                  maxFacets = minFacets;
+                }
+              }
+              if (maxFacets > 0 && facets.length > maxFacets) {
+  console.log(`  - Generated ${facets.length} facets, trimming to ${maxFacets} as per requirements`);
   
-  const additionalPrompt = `
+  // Sort by priority first, then by confidence score
+  const priorityOrder = { "High": 1, "Medium": 2, "Low": 3 };
+  facets.sort((a, b) => {
+    // First by priority
+    const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
+    if (priorityDiff !== 0) return priorityDiff;
+    
+    // Then by confidence score (descending)
+    return b.confidence_score - a.confidence_score;
+  });
+  
+  // Keep only the top maxFacets
+  facets = facets.slice(0, maxFacets);
+  console.log(`  - Trimmed to ${maxFacets} facets based on priority and confidence score`);
+}
+              // Only request more facets if a minimum is specified and we don't have enough
+              if (minFacets > 0 && facets.length < minFacets) {
+                console.log(`  - Warning: Only ${facets.length} facets generated, requirement is ${minFacets}${maxFacets > minFacets ? `-${maxFacets}` : ''}, requesting more...`);
+
+                const additionalPrompt = `
 You previously generated ${facets.length} facets for ${category.name}. 
 This is INSUFFICIENT based on the requirements. You MUST generate AT LEAST ${minFacets - facets.length} MORE UNIQUE facets.
 
@@ -500,160 +517,159 @@ Focus on additional attributes like:
 Follow the same format as before for each facet.
 `;
 
-  const additionalResult = await generateFacetsWithAI(
-    facetSystemPrompt,
-    category.name,
-    category.category_path || category.name,
-    additionalPrompt
-  );
-  
-  if (additionalResult.facets && Array.isArray(additionalResult.facets)) {
-    const existingFacetNames = new Set(facets.map(f => f.facet_name));
-    const uniqueAdditionalFacets = additionalResult.facets.filter(
-      f => !existingFacetNames.has(f.facet_name)
-    );
-    console.log(`  - Generated ${uniqueAdditionalFacets.length} additional unique facets`);
-    facets = [...facets, ...uniqueAdditionalFacets];
-  }
-}
-
-                if (Array.isArray(facets)) {
-                  facets.forEach(facet => categoryFacets.push({
-                    ...facet,
-                    source_prompt: 'Master (with SEO intelligence)'
-                  }));
-                }
-                console.log(`  - Stage 2 completed: Generated ${facets.length} facets`);
-              } else {
-                // This handles any other standard prompts (if any)
-                let template = prompt.content as string;
-
-                Object.entries(categoryContext).forEach(([key, value]) => {
-                  template = template.replace(new RegExp(`{{${key}}}`, 'g'), value);
-                });
-                Object.entries(generatedContext).forEach(([key, value]) => {
-                  template = template.replace(new RegExp(`{{${key}}}`, 'g'), JSON.stringify(value, null, 2));
-                });
-
-                const aiResult = await generateFacetsWithAI(
+                const additionalResult = await generateFacetsWithAI(
                   facetSystemPrompt,
                   category.name,
                   category.category_path || category.name,
-                  template
+                  additionalPrompt
                 );
 
-                const facets = aiResult.facets || [];
-                if (Array.isArray(facets)) {
-                  facets.forEach(facet => categoryFacets.push({ ...facet, source_prompt: prompt.name }));
+                if (additionalResult.facets && Array.isArray(additionalResult.facets)) {
+                  const existingFacetNames = new Set(facets.map(f => f.facet_name));
+                  const uniqueAdditionalFacets = additionalResult.facets.filter(
+                    f => !existingFacetNames.has(f.facet_name)
+                  );
+                  console.log(`  - Generated ${uniqueAdditionalFacets.length} additional unique facets`);
+                  facets = [...facets, ...uniqueAdditionalFacets];
                 }
               }
-            } catch (promptError) {
-              console.error(`Error executing prompt "${prompt.name}" for category "${category.name}":`, promptError.message);
+
+              if (Array.isArray(facets)) {
+                facets.forEach(facet => categoryFacets.push({
+                  ...facet,
+                  source_prompt: 'Master (with SEO intelligence)'
+                }));
+              }
+              console.log(`  - Stage 2 completed: Generated ${facets.length} facets`);
+            } else {
+              // This handles any other standard prompts (if any)
+              let template = prompt.content as string;
+
+              Object.entries(categoryContext).forEach(([key, value]) => {
+                template = template.replace(new RegExp(`{{${key}}}`, 'g'), value);
+              });
+              Object.entries(generatedContext).forEach(([key, value]) => {
+                template = template.replace(new RegExp(`{{${key}}}`, 'g'), JSON.stringify(value, null, 2));
+              });
+
+              const aiResult = await generateFacetsWithAI(
+                facetSystemPrompt,
+                category.name,
+                category.category_path || category.name,
+                template
+              );
+
+              const facets = aiResult.facets || [];
+              if (Array.isArray(facets)) {
+                facets.forEach(facet => categoryFacets.push({ ...facet, source_prompt: prompt.name }));
+              }
             }
+          } catch (promptError) {
+            console.error(`Error executing prompt "${prompt.name}" for category "${category.name}":`, promptError.message);
           }
+        }
 
         for (const rawFacet of categoryFacets) {
-            const cleanFacet = {
-              ...rawFacet,
-              confidence_score: Math.round(
-                Math.max(1, Math.min(10, Number(rawFacet.confidence_score) || 0))
-              ),
+          const cleanFacet = {
+            ...rawFacet,
+            confidence_score: Math.round(
+              Math.max(1, Math.min(10, Number(rawFacet.confidence_score) || 0))
+            ),
 
-              filling_percentage: Math.round(
-                Math.max(
-                  0,
-                  Math.min(
-                    100,
-                    Number(rawFacet.filling_percentage) < 1
-                      ? Number(rawFacet.filling_percentage) * 100
-                      : Number(rawFacet.filling_percentage) || 0
-                  )
+            filling_percentage: Math.round(
+              Math.max(
+                0,
+                Math.min(
+                  100,
+                  Number(rawFacet.filling_percentage) < 1
+                    ? Number(rawFacet.filling_percentage) * 100
+                    : Number(rawFacet.filling_percentage) || 0
                 )
-              ),
-            };
-            allFacetsToInsert.push({
-              job_id,
-              category_id: category.id,
-              client_id: job.client_id,
-              prompt_used: selectedPromptIds.join(", "),
-              ...cleanFacet,
-            });
-          }
-
-          processedCount++;
-          const progress = Math.round(
-            (processedCount / category_ids.length) * 100
-          );
-          await supabase
-            .from("facet_generation_jobs")
-            .update({ progress, processed_categories: processedCount })
-            .eq("id", job_id);
-        } catch (error) {
-          console.error(
-            `Error processing category ${category.id}:`,
-            error.message
-          );
+              )
+            ),
+          };
+          allFacetsToInsert.push({
+            job_id,
+            category_id: category.id,
+            client_id: job.client_id,
+            prompt_used: selectedPromptIds.join(", "),
+            ...cleanFacet,
+          });
         }
+
+        processedCount++;
+        const progress = Math.round(
+          (processedCount / category_ids.length) * 100
+        );
+        await supabase
+          .from("facet_generation_jobs")
+          .update({ progress, processed_categories: processedCount })
+          .eq("id", job_id);
+      } catch (error) {
+        console.error(
+          `Error processing category ${category.id}:`,
+          error.message
+        );
       }
-
-    // --- The rest of the function remains the same (sorting, inserting, final update) ---
-    if (allFacetsToInsert.length > 0) {
-        const priorityOrder = { High: 1, Medium: 2, Low: 3 };
-        allFacetsToInsert.sort((a, b) => {
-          const pA = priorityOrder[a.priority] || 4;
-          const pB = priorityOrder[b.priority] || 4;
-          if (pA !== pB) return pA - pB;
-          if ((b.confidence_score || 0) !== (a.confidence_score || 0))
-            return (b.confidence_score || 0) - (a.confidence_score || 0);
-          return (b.filling_percentage || 0) - (a.filling_percentage || 0);
-        });
-        allFacetsToInsert.forEach((facet, index) => {
-          facet.sort_order = index + 1;
-        });
-
-        const { error: insertError } = await supabase
-          .from("recommended_facets")
-          .insert(allFacetsToInsert);
-        if (insertError) throw insertError;
-      }
-
-      await supabase
-        .from("facet_generation_jobs")
-        .update({
-          status: "completed",
-          progress: 100,
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", job_id);
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          facets_generated: allFacetsToInsert.length,
-          categories_processed: processedCount,
-        }),
-        {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    } catch (error) {
-      console.error("Function error:", error);
-      if (jobIdFromRequest) {
-        try {
-          const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-          const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-          const supabase = createClient(supabaseUrl, supabaseKey);
-          await supabase
-            .from("facet_generation_jobs")
-            .update({ status: "failed", error_message: error.message })
-            .eq("id", jobIdFromRequest);
-        } catch (e) {
-          console.error("Failed to update job status to failed:", e);
-        }
-      }
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
     }
-  });
+
+      if (allFacetsToInsert.length > 0) {
+      const priorityOrder = { High: 1, Medium: 2, Low: 3 };
+      allFacetsToInsert.sort((a, b) => {
+        const pA = priorityOrder[a.priority] || 4;
+        const pB = priorityOrder[b.priority] || 4;
+        if (pA !== pB) return pA - pB;
+        if ((b.confidence_score || 0) !== (a.confidence_score || 0))
+          return (b.confidence_score || 0) - (a.confidence_score || 0);
+        return (b.filling_percentage || 0) - (a.filling_percentage || 0);
+      });
+      allFacetsToInsert.forEach((facet, index) => {
+        facet.sort_order = index + 1;
+      });
+
+      const { error: insertError } = await supabase
+        .from("recommended_facets")
+        .insert(allFacetsToInsert);
+      if (insertError) throw insertError;
+    }
+
+    await supabase
+      .from("facet_generation_jobs")
+      .update({
+        status: "completed",
+        progress: 100,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", job_id);
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        facets_generated: allFacetsToInsert.length,
+        categories_processed: processedCount,
+      }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
+  } catch (error) {
+    console.error("Function error:", error);
+    if (jobIdFromRequest) {
+      try {
+        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+        const supabase = createClient(supabaseUrl, supabaseKey);
+        await supabase
+          .from("facet_generation_jobs")
+          .update({ status: "failed", error_message: error.message })
+          .eq("id", jobIdFromRequest);
+      } catch (e) {
+        console.error("Failed to update job status to failed:", e);
+      }
+    }
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
