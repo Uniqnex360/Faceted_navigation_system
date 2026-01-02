@@ -480,9 +480,9 @@ export default function PromptManagement() {
             className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
           />
           
-          <div className="mt-2 text-xs text-slate-500">
+          {/* <div className="mt-2 text-xs text-slate-500">
             <p>You can use <code className="bg-slate-100 px-1 py-0.5 rounded">{"${previousLevelResult}"}</code> to reference results from previous levels.</p>
-          </div>
+          </div> */}
         </div>
       ))}
     </div>
