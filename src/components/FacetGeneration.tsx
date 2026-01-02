@@ -291,6 +291,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
             id: prompt.id,
             name: prompt.name,
             content: assembledContent,
+             metadata: prompt.metadata,
           };
         })
         .filter((p) => p !== null);

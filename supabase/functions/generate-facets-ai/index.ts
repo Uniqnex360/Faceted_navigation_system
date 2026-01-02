@@ -297,7 +297,7 @@ Deno.serve(async (req: Request) => {
         // Remove the commented-out code and use this instead:
         for (const prompt of promptPayloads) {
           console.log(`-- Using Prompt: ${prompt.name} --`);
-
+          console.log(`DEBUG: Received prompt object: ${JSON.stringify(prompt, null, 2)}`);
           try {
             // STAGE 1: Industry Keywords (Single Level SEO Extraction)
             if (prompt.name === 'Industry Keywords' && typeof prompt.content === 'string') {
@@ -327,7 +327,9 @@ Deno.serve(async (req: Request) => {
                console.log(`\n${"=".repeat(40)}\nLEVEL 1 OUTPUT (passed to next level):\n${"=".repeat(40)}\n${JSON.stringify(generatedContext['Latest_Level_Result'], null, 2)}\n${"=".repeat(40)}\n`);
               // Process additional levels if they exist in metadata
               const additionalLevels = (prompt.metadata as any)?.industry_levels || {};
-
+              console.log("Additional levels found:", Object.keys(additionalLevels));
+console.log("Category path parts:", category.category_path ? category.category_path.split(" > ") : [category.name]);
+console.log("Category context:", categoryContext);
               if (Object.keys(additionalLevels).length > 0) {
                 console.log(`  - Processing ${Object.keys(additionalLevels).length} additional levels`);
 
