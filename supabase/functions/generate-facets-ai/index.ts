@@ -324,7 +324,7 @@ Deno.serve(async (req: Request) => {
               // Store for Stage 2
               generatedContext['Industry_SEO_Meta'] = seoMetaData;
               generatedContext['Latest_Level_Result'] = seoMetaData; // Track the latest result
-
+               console.log(`\n${"=".repeat(40)}\nLEVEL 1 OUTPUT (passed to next level):\n${"=".repeat(40)}\n${JSON.stringify(generatedContext['Latest_Level_Result'], null, 2)}\n${"=".repeat(40)}\n`);
               // Process additional levels if they exist in metadata
               const additionalLevels = (prompt.metadata as any)?.industry_levels || {};
 
@@ -335,14 +335,20 @@ Deno.serve(async (req: Request) => {
                 const sortedLevels = Object.keys(additionalLevels)
                   .map(Number)
                   .sort((a, b) => a - b);
+                console.log(`\n${"=".repeat(40)}\nLEVEL 1 INPUT:\n${"=".repeat(40)}\n${template}\n${"=".repeat(40)}\n`);
 
+// After processing Level 1
+console.log(`\n${"=".repeat(40)}\nLEVEL 1 OUTPUT (passed to next level):\n${"=".repeat(40)}\n${JSON.stringify(generatedContext['Latest_Level_Result'], null, 2)}\n${"=".repeat(40)}\n`);
                 for (const levelNum of sortedLevels) {
+                  
                   let levelTemplate = additionalLevels[levelNum];
 
                   // Replace context variables in level template
                   Object.entries(categoryContext).forEach(([key, value]) => {
                     levelTemplate = levelTemplate.replace(new RegExp(`{{${key}}}`, 'g'), value);
                   });
+                    console.log(`\n${"=".repeat(40)}\nLEVEL ${levelNum} INPUT (before replacement):\n${"=".repeat(40)}\n${levelTemplate}\n${"=".repeat(40)}\n`);
+
 
                   // Replace previous level results
                   if (generatedContext['Latest_Level_Result']) {
@@ -351,7 +357,8 @@ Deno.serve(async (req: Request) => {
                       JSON.stringify(generatedContext['Latest_Level_Result'], null, 2)
                     );
                   }
-
+                   console.log(`\n${"=".repeat(40)}\nLEVEL ${levelNum} INPUT (after replacement):\n${"=".repeat(40)}\n${levelTemplate}\n${"=".repeat(40)}\n`);
+        console.log(`\n${"=".repeat(40)}\nPREVIOUS LEVEL RESULT INSERTED:\n${"=".repeat(40)}\n${JSON.stringify(generatedContext['Latest_Level_Result'], null, 2)}\n${"=".repeat(40)}\n`);
                   console.log(`--- STAGE 1 TEMPLATE FOR AI (Level ${levelNum}) ---\n`, levelTemplate);
 
                   // Execute AI for this level
@@ -364,6 +371,7 @@ Deno.serve(async (req: Request) => {
 
                   // Store this level's results
                   generatedContext[`Level_${levelNum}_SEO_Meta`] = levelSeoData;
+                  console.log(`\n${"=".repeat(40)}\nLEVEL ${levelNum} OUTPUT (passed to next level):\n${"=".repeat(40)}\n${JSON.stringify(levelSeoData, null, 2)}\n${"=".repeat(40)}\n`);
 
                   // Update the latest result for the next level to use
                   generatedContext['Latest_Level_Result'] = levelSeoData;
