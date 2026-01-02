@@ -323,13 +323,14 @@ Deno.serve(async (req: Request) => {
 
               // Store for Stage 2
               generatedContext['Industry_SEO_Meta'] = seoMetaData;
+              generatedContext['Level_1_SEO_Meta'] = seoMetaData;
               generatedContext['Latest_Level_Result'] = seoMetaData; // Track the latest result
-               console.log(`\n${"=".repeat(40)}\nLEVEL 1 OUTPUT (passed to next level):\n${"=".repeat(40)}\n${JSON.stringify(generatedContext['Latest_Level_Result'], null, 2)}\n${"=".repeat(40)}\n`);
+              console.log(`\n${"=".repeat(40)}\nLEVEL 1 OUTPUT (passed to next level):\n${"=".repeat(40)}\n${JSON.stringify(generatedContext['Latest_Level_Result'], null, 2)}\n${"=".repeat(40)}\n`);
               // Process additional levels if they exist in metadata
               const additionalLevels = (prompt.metadata as any)?.industry_levels || {};
               console.log("Additional levels found:", Object.keys(additionalLevels));
-console.log("Category path parts:", category.category_path ? category.category_path.split(" > ") : [category.name]);
-console.log("Category context:", categoryContext);
+              console.log("Category path parts:", category.category_path ? category.category_path.split(" > ") : [category.name]);
+              console.log("Category context:", categoryContext);
               if (Object.keys(additionalLevels).length > 0) {
                 console.log(`  - Processing ${Object.keys(additionalLevels).length} additional levels`);
 
@@ -339,28 +340,31 @@ console.log("Category context:", categoryContext);
                   .sort((a, b) => a - b);
                 console.log(`\n${"=".repeat(40)}\nLEVEL 1 INPUT:\n${"=".repeat(40)}\n${template}\n${"=".repeat(40)}\n`);
 
-// After processing Level 1
-console.log(`\n${"=".repeat(40)}\nLEVEL 1 OUTPUT (passed to next level):\n${"=".repeat(40)}\n${JSON.stringify(generatedContext['Latest_Level_Result'], null, 2)}\n${"=".repeat(40)}\n`);
+                // After processing Level 1
+                console.log(`\n${"=".repeat(40)}\nLEVEL 1 OUTPUT (passed to next level):\n${"=".repeat(40)}\n${JSON.stringify(generatedContext['Latest_Level_Result'], null, 2)}\n${"=".repeat(40)}\n`);
                 for (const levelNum of sortedLevels) {
-                  
+
                   let levelTemplate = additionalLevels[levelNum];
 
                   // Replace context variables in level template
                   Object.entries(categoryContext).forEach(([key, value]) => {
                     levelTemplate = levelTemplate.replace(new RegExp(`{{${key}}}`, 'g'), value);
                   });
-                    console.log(`\n${"=".repeat(40)}\nLEVEL ${levelNum} INPUT (before replacement):\n${"=".repeat(40)}\n${levelTemplate}\n${"=".repeat(40)}\n`);
+                  console.log(`\n${"=".repeat(40)}\nLEVEL ${levelNum} INPUT (before replacement):\n${"=".repeat(40)}\n${levelTemplate}\n${"=".repeat(40)}\n`);
 
 
                   // Replace previous level results
-                  if (generatedContext['Latest_Level_Result']) {
-                    levelTemplate = levelTemplate.replace(
-                      /\$\{previousLevelResult\}/g,
-                      JSON.stringify(generatedContext['Latest_Level_Result'], null, 2)
-                    );
+                  for (let i = 1; i < levelNum; i++) {
+                    const placeholder = `{{Level_${i}_Meta_JSON}}`;
+                    if (generatedContext[`Level_${i}_SEO_Meta`]) {
+                      levelTemplate = levelTemplate.replace(
+                        new RegExp(placeholder, 'g'),
+                        JSON.stringify(generatedContext[`Level_${i}_SEO_Meta`], null, 2)
+                      );
+                    }
                   }
-                   console.log(`\n${"=".repeat(40)}\nLEVEL ${levelNum} INPUT (after replacement):\n${"=".repeat(40)}\n${levelTemplate}\n${"=".repeat(40)}\n`);
-        console.log(`\n${"=".repeat(40)}\nPREVIOUS LEVEL RESULT INSERTED:\n${"=".repeat(40)}\n${JSON.stringify(generatedContext['Latest_Level_Result'], null, 2)}\n${"=".repeat(40)}\n`);
+                  console.log(`\n${"=".repeat(40)}\nLEVEL ${levelNum} INPUT (after replacement):\n${"=".repeat(40)}\n${levelTemplate}\n${"=".repeat(40)}\n`);
+                  console.log(`\n${"=".repeat(40)}\nPREVIOUS LEVEL RESULT INSERTED:\n${"=".repeat(40)}\n${JSON.stringify(generatedContext['Latest_Level_Result'], null, 2)}\n${"=".repeat(40)}\n`);
                   console.log(`--- STAGE 1 TEMPLATE FOR AI (Level ${levelNum}) ---\n`, levelTemplate);
 
                   // Execute AI for this level
@@ -389,7 +393,7 @@ console.log(`\n${"=".repeat(40)}\nLEVEL 1 OUTPUT (passed to next level):\n${"=".
               }
 
               console.log('  - Stage 1 completed: SEO meta data extracted for all levels');
-            } if (prompt.name === 'Output Format-1' && typeof prompt.content === 'string') {
+            } else if (prompt.name === 'Output Format-1' && typeof prompt.content === 'string') {
               console.log('  - Starting Stage 2: Output Format-1 prompt with SEO intelligence');
 
               let template = prompt.content as string;
@@ -399,50 +403,63 @@ console.log(`\n${"=".repeat(40)}\nLEVEL 1 OUTPUT (passed to next level):\n${"=".
                 template = template.replace(new RegExp(`{{${key}}}`, 'g'), value);
               });
 
-              // NEW CODE: Handle meta information placeholders dynamically
-              // First, extract the META INFORMATIONS section
-              const metaInfoRegex = /META\s+INFORMATIONS:\s*\n([\s\S]*?)(?=\n\w+|\n$)/i;
+              // ========================================
+              // FIXED: Handle META INFORMATIONS section
+              // ========================================
+              const metaInfoRegex = /META\s+INFORMATIONS:\s*\n([\s\S]*?)(?=\n[A-Z\s]+:|\n$)/i;
               const metaInfoMatch = template.match(metaInfoRegex);
 
-              if (metaInfoMatch && metaInfoMatch[1]) {
-                // Get the original meta info section
+              if (metaInfoMatch && metaInfoMatch[0]) {
                 const originalMetaSection = metaInfoMatch[0];
 
-                // Build a new meta section with only available data
+                // Get all available level data
+                const allLevels = Object.keys(generatedContext)
+                  .filter(k => k.endsWith('_SEO_Meta'))
+                  .map(k => parseInt(k.match(/\d+/)?.[0] || '0'))
+                  .filter(n => n > 0) // Only numbered levels
+                  .sort((a, b) => a - b); // Sort ascending: 1, 2, 3
+
+                console.log(`  - Found ${allLevels.length} levels of SEO data:`, allLevels);
+
+                // Build complete meta section with ALL levels
                 let newMetaSection = "META INFORMATIONS:\n";
 
-                // Add Level 1 meta if available
-                if (generatedContext['Industry_SEO_Meta']) {
-                  newMetaSection += JSON.stringify(generatedContext['Industry_SEO_Meta'], null, 2) + "\n";
-                }
-
-                // Add any additional level meta that exists
-                for (let i = 2; i <= 10; i++) {
-                  if (generatedContext[`Level_${i}_SEO_Meta`]) {
-                    newMetaSection += JSON.stringify(generatedContext[`Level_${i}_SEO_Meta`], null, 2) + "\n";
+                if (allLevels.length === 0) {
+                  // Fallback: use Industry_SEO_Meta if no numbered levels exist
+                  if (generatedContext['Industry_SEO_Meta']) {
+                    newMetaSection += JSON.stringify(generatedContext['Industry_SEO_Meta'], null, 2) + "\n";
+                  } else {
+                    newMetaSection += "{}\n";
+                  }
+                } else {
+                  // Include ALL levels in order
+                  for (const levelNum of allLevels) {
+                    const levelData = generatedContext[`Level_${levelNum}_SEO_Meta`];
+                    if (levelData) {
+                      newMetaSection += `\nLevel ${levelNum} Meta:\n`;
+                      newMetaSection += JSON.stringify(levelData, null, 2) + "\n";
+                    }
                   }
                 }
 
-                // Replace the original section with our new one
+                // Replace the original section
                 template = template.replace(originalMetaSection, newMetaSection);
+                console.log(`  - Injected ${allLevels.length} levels into META INFORMATIONS`);
               }
 
-              // Also handle any remaining specific level placeholders
+              // ========================================
+              // Handle individual placeholder replacements (backup)
+              // ========================================
               for (let i = 1; i <= 10; i++) {
                 const placeholder = `{{Level_${i}_Meta_JSON}}`;
                 if (template.includes(placeholder)) {
-                  if (i === 1 && generatedContext['Industry_SEO_Meta']) {
-                    template = template.replace(
-                      new RegExp(placeholder, 'g'),
-                      JSON.stringify(generatedContext['Industry_SEO_Meta'], null, 2)
-                    );
-                  } else if (generatedContext[`Level_${i}_SEO_Meta`]) {
+                  if (generatedContext[`Level_${i}_SEO_Meta`]) {
                     template = template.replace(
                       new RegExp(placeholder, 'g'),
                       JSON.stringify(generatedContext[`Level_${i}_SEO_Meta`], null, 2)
                     );
                   } else {
-                    // Remove the placeholder if we don't have data for this level
+                    // Remove placeholder if no data
                     template = template.replace(new RegExp(placeholder, 'g'), "");
                   }
                 }
@@ -451,12 +468,10 @@ console.log(`\n${"=".repeat(40)}\nLEVEL 1 OUTPUT (passed to next level):\n${"=".
               // Handle other generic placeholders
               template = template.replace(/\$\{categoryName\}/g, category.name);
               template = template.replace(/\$\{categoryPath\}/g, category.category_path || category.name);
-              template = template.replace(/\$\{stage1MetaResult\}/g,
-                JSON.stringify(generatedContext['Industry_SEO_Meta'] || {}, null, 2));
 
-              console.log(`--- STAGE 2 TEMPLATE FOR AI ---\n`, template);
+              console.log(`\n${"=".repeat(80)}\n📋 FINAL OUTPUT FORMAT TEMPLATE:\n${"=".repeat(80)}\n${template.substring(0, 1500)}...\n${"=".repeat(80)}\n`);
 
-              // Execute Master prompt to generate facets
+              // Execute Output Format prompt to generate facets
               const aiResult = await generateFacetsWithAI(
                 facetSystemPrompt,
                 category.name,
@@ -464,67 +479,56 @@ console.log(`\n${"=".repeat(40)}\nLEVEL 1 OUTPUT (passed to next level):\n${"=".
                 template
               );
 
-              // NEW CODE: Check if we have enough facets, if not, request more
-              // NEW CODE: Check if we have enough facets based on the prompt requirements
               let facets = aiResult.facets || [];
               console.log(`  - Initial facet generation: ${facets.length} facets`);
 
-              // Extract the required facet count from the prompt
-              let minFacets = 0; // Default to no minimum
-              let maxFacets = 0; // Default to no maximum
+              // Extract required facet count
+              let minFacets = 0;
+              let maxFacets = 0;
               const facetCountMatch = template.match(/contain\s+(\d+)–(\d+)\s+filters/i) ||
                 template.match(/contain\s+(\d+)-(\d+)\s+filters/i) ||
                 template.match(/contain\s+(\d+)\s+filters/i);
 
               if (facetCountMatch) {
                 if (facetCountMatch.length >= 3) {
-                  // Range format: "contain X-Y filters"
                   minFacets = parseInt(facetCountMatch[1], 10);
                   maxFacets = parseInt(facetCountMatch[2], 10);
                 } else if (facetCountMatch.length >= 2) {
-                  // Single number format: "contain X filters"
                   minFacets = parseInt(facetCountMatch[1], 10);
                   maxFacets = minFacets;
                 }
               }
+
+              // Trim if too many
               if (maxFacets > 0 && facets.length > maxFacets) {
-  console.log(`  - Generated ${facets.length} facets, trimming to ${maxFacets} as per requirements`);
-  
-  // Sort by priority first, then by confidence score
-  const priorityOrder = { "High": 1, "Medium": 2, "Low": 3 };
-  facets.sort((a, b) => {
-    // First by priority
-    const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
-    if (priorityDiff !== 0) return priorityDiff;
-    
-    // Then by confidence score (descending)
-    return b.confidence_score - a.confidence_score;
-  });
-  
-  // Keep only the top maxFacets
-  facets = facets.slice(0, maxFacets);
-  console.log(`  - Trimmed to ${maxFacets} facets based on priority and confidence score`);
-}
-              // Only request more facets if a minimum is specified and we don't have enough
+                console.log(`  - Trimming from ${facets.length} to ${maxFacets} facets`);
+                const priorityOrder = { "High": 1, "Medium": 2, "Low": 3 };
+                facets.sort((a, b) => {
+                  const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
+                  if (priorityDiff !== 0) return priorityDiff;
+                  return b.confidence_score - a.confidence_score;
+                });
+                facets = facets.slice(0, maxFacets);
+              }
+
+              // Request more if insufficient
               if (minFacets > 0 && facets.length < minFacets) {
-                console.log(`  - Warning: Only ${facets.length} facets generated, requirement is ${minFacets}${maxFacets > minFacets ? `-${maxFacets}` : ''}, requesting more...`);
+                console.log(`  - Requesting ${minFacets - facets.length} additional facets...`);
 
                 const additionalPrompt = `
 You previously generated ${facets.length} facets for ${category.name}. 
-This is INSUFFICIENT based on the requirements. You MUST generate AT LEAST ${minFacets - facets.length} MORE UNIQUE facets.
+You MUST generate AT LEAST ${minFacets - facets.length} MORE UNIQUE facets.
 
 Current facets: ${facets.map(f => f.facet_name).join(', ')}
 
-Focus on additional attributes like:
-- Marine-specific features
-- Environmental considerations
-- Application scenarios
-- Safety features
-- Compatibility with specific boat materials
-- Usage conditions (saltwater vs freshwater)
+Focus on:
+- Product capabilities and features
+- Compatibility and usage requirements
+- Environmental and safety considerations
+- Application-specific attributes
 - Certifications and standards
 
-Follow the same format as before for each facet.
+Follow the same JSON format.
 `;
 
                 const additionalResult = await generateFacetsWithAI(
@@ -535,45 +539,56 @@ Follow the same format as before for each facet.
                 );
 
                 if (additionalResult.facets && Array.isArray(additionalResult.facets)) {
-                  const existingFacetNames = new Set(facets.map(f => f.facet_name));
-                  const uniqueAdditionalFacets = additionalResult.facets.filter(
-                    f => !existingFacetNames.has(f.facet_name)
+                  const existingNames = new Set(facets.map(f => f.facet_name));
+                  const uniqueNew = additionalResult.facets.filter(
+                    f => !existingNames.has(f.facet_name)
                   );
-                  console.log(`  - Generated ${uniqueAdditionalFacets.length} additional unique facets`);
-                  facets = [...facets, ...uniqueAdditionalFacets];
+                  console.log(`  - Added ${uniqueNew.length} unique facets`);
+                  facets = [...facets, ...uniqueNew];
                 }
               }
 
+              // Add facets to category collection
               if (Array.isArray(facets)) {
                 facets.forEach(facet => categoryFacets.push({
                   ...facet,
-                  source_prompt: 'Master (with SEO intelligence)'
+                  source_prompt: 'Output Format-1 (with SEO intelligence)'
                 }));
               }
-              console.log(`  - Stage 2 completed: Generated ${facets.length} facets`);
-            } else {
-              // This handles any other standard prompts (if any)
-              let template = prompt.content as string;
 
-              Object.entries(categoryContext).forEach(([key, value]) => {
-                template = template.replace(new RegExp(`{{${key}}}`, 'g'), value);
-              });
-              Object.entries(generatedContext).forEach(([key, value]) => {
-                template = template.replace(new RegExp(`{{${key}}}`, 'g'), JSON.stringify(value, null, 2));
-              });
-
-              const aiResult = await generateFacetsWithAI(
-                facetSystemPrompt,
-                category.name,
-                category.category_path || category.name,
-                template
-              );
-
-              const facets = aiResult.facets || [];
-              if (Array.isArray(facets)) {
-                facets.forEach(facet => categoryFacets.push({ ...facet, source_prompt: prompt.name }));
-              }
+              console.log(`  - Stage 2 completed: ${facets.length} total facets`);
             }
+            else {
+  // Handle any other standard prompts (if any exist)
+  console.log(`  - Processing standard prompt: ${prompt.name}`);
+  let template = prompt.content as string;
+
+  // Replace context variables
+  Object.entries(categoryContext).forEach(([key, value]) => {
+    template = template.replace(new RegExp(`{{${key}}}`, 'g'), value);
+  });
+  
+  // Replace generated context variables
+  Object.entries(generatedContext).forEach(([key, value]) => {
+    template = template.replace(new RegExp(`{{${key}}}`, 'g'), JSON.stringify(value, null, 2));
+  });
+
+  const aiResult = await generateFacetsWithAI(
+    facetSystemPrompt,
+    category.name,
+    category.category_path || category.name,
+    template
+  );
+
+  const facets = aiResult.facets || [];
+  if (Array.isArray(facets)) {
+    facets.forEach(facet => categoryFacets.push({ 
+      ...facet, 
+      source_prompt: prompt.name 
+    }));
+  }
+  console.log(`  - Standard prompt completed: ${facets.length} facets`);
+}
           } catch (promptError) {
             console.error(`Error executing prompt "${prompt.name}" for category "${category.name}":`, promptError.message);
           }
@@ -623,7 +638,7 @@ Follow the same format as before for each facet.
       }
     }
 
-      if (allFacetsToInsert.length > 0) {
+    if (allFacetsToInsert.length > 0) {
       const priorityOrder = { High: 1, Medium: 2, Low: 3 };
       allFacetsToInsert.sort((a, b) => {
         const pA = priorityOrder[a.priority] || 4;
@@ -662,6 +677,7 @@ Follow the same format as before for each facet.
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
+
   } catch (error) {
     console.error("Function error:", error);
     if (jobIdFromRequest) {
