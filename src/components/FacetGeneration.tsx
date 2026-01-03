@@ -12,6 +12,17 @@ interface FacetGenerationProps {
 
 export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
   const { user } = useAuth();
+  const [columnMapping, setColumnMapping] = useState({
+    input_taxonomy: "A. Input Taxonomy",
+    end_category: "B. End Category (C3)",
+    facet_name: "C. Filter Attributes",
+    possible_values: "D. Possible Values",
+    filling_percentage: "E. Filling Percentage (Approx.)",
+    priority: "F. Priority (High / Medium / Low)",
+    confidence_score: "G. Confidence Score (1–10)",
+    num_sources: "H. # of available sources",
+    source_urls: "I. List the sources URL",
+  });
   const [categories, setCategories] = useState<Category[]>([]);
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(
@@ -114,7 +125,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
         .from("prompt_templates")
         .select("*")
         .order("level")
-        .eq('is_active',true)
+        .eq("is_active", true)
         .order("execution_order"),
     ]);
     const loadedPrompts = (promptsData.data as PromptTemplate[]) || [];
@@ -193,18 +204,20 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
   const generateFacets = async () => {
     if (selectedCategories.size === 0) return;
     if (!user) {
-        setError("You must be logged in to perform this action.");
-        return;
-      }
-    const clientIdToSave = user.client_id; 
+      setError("You must be logged in to perform this action.");
+      return;
+    }
+    const clientIdToSave = user.client_id;
     if (!clientIdToSave) {
-        setError("Your user profile is not associated with a client. Cannot create job.");
-        setIsGenerating(false); // Make sure the spinner stops if it started
-        return; // Stop the function here.
-      }
-     if (selectedCategories.size === 0) {
-        return; // This check is also good to have
-      }
+      setError(
+        "Your user profile is not associated with a client. Cannot create job."
+      );
+      setIsGenerating(false); // Make sure the spinner stops if it started
+      return; // Stop the function here.
+    }
+    if (selectedCategories.size === 0) {
+      return; // This check is also good to have
+    }
 
     setIsGenerating(true);
     setError(null);
@@ -245,11 +258,11 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
 
           let assembledContent: string | object | string[];
 
-           if (prompt.name === "Industry Keywords") {
-              // const level1Content = prompt.template || "";
-              // const otherLevels = (prompt.metadata as any)?.marine_levels || [];
-              // assembledContent = [level1Content, ...otherLevels].filter(Boolean);
-                assembledContent = prompt.template || "";
+          if (prompt.name === "Industry Keywords") {
+            // const level1Content = prompt.template || "";
+            // const otherLevels = (prompt.metadata as any)?.marine_levels || [];
+            // assembledContent = [level1Content, ...otherLevels].filter(Boolean);
+            assembledContent = prompt.template || "";
 
             // } else if (prompt.name === "Geography") {
             //   const countryTemplatesArray =
@@ -263,7 +276,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
             //     );
 
             //     const selectedCountriesForJob = promptSubSelections[prompt.id] || new Set();
-                
+
             //     // This rule requires a selection if more than 1 country is available
             //     if (countryTemplatesArray.length > 1 && selectedCountriesForJob.size === 0) {
             //        // This case is handled by the validation loop before this map runs.
@@ -280,18 +293,17 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
             //       );
             //     }
             //   }
-            // } 
-}
-            else {
-              // This is the fallback for all other standard prompts
-              assembledContent = prompt.template;
-            }
+            // }
+          } else {
+            // This is the fallback for all other standard prompts
+            assembledContent = prompt.template;
+          }
 
           return {
             id: prompt.id,
             name: prompt.name,
             content: assembledContent,
-             metadata: prompt.metadata,
+            metadata: prompt.metadata,
           };
         })
         .filter((p) => p !== null);
@@ -337,8 +349,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
         );
       }
       const responseData = await response.json();
-console.log('🎯 API RESPONSE:', responseData);
-
+      console.log("🎯 API RESPONSE:", responseData);
 
       const { data: facets } = await supabase
         .from("recommended_facets")
@@ -347,6 +358,26 @@ console.log('🎯 API RESPONSE:', responseData);
         .order("sort_order");
       const fetchedFacets = (facets as RecommendedFacet[]) || [];
       setGeneratedFacets(fetchedFacets);
+      const { data: jobData } = await supabase
+        .from("facet_generation_jobs")
+        .select("metadata")
+        .eq("id", job.id)
+        .single();
+
+      if (jobData?.metadata?.output_format?.columns) {
+        const columns = jobData.metadata.output_format.columns;
+        setColumnMapping({
+          input_taxonomy: columns[0] || "A. Input Taxonomy",
+          end_category: columns[1] || "B. End Category (C3)",
+          facet_name: columns[2] || "C. Filter Attributes",
+          possible_values: columns[3] || "D. Possible Values",
+          filling_percentage: columns[4] || "E. Filling Percentage (Approx.)",
+          priority: columns[5] || "F. Priority (High / Medium / Low)",
+          confidence_score: columns[6] || "G. Confidence Score (1–10)",
+          num_sources: columns[7] || "H. # of available sources",
+          source_urls: columns[8] || "I. List the sources URL",
+        });
+      }
       const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
       const grouped = fetchedFacets.reduce((acc, facet) => {
         const categoryId = facet.category_id;
@@ -383,63 +414,94 @@ console.log('🎯 API RESPONSE:', responseData);
 
   // Replace the existing exportFacets function with this new version
 
-  const exportFacets = async () => {
-    // Flatten the selected IDs from all categories into a single Set
-    const allSelectedIds = new Set(
-      Object.values(selectedFacetsForExport).flatMap((set) => Array.from(set))
-    );
+const exportFacets = async () => {
+  const allSelectedIds = new Set(
+    Object.values(selectedFacetsForExport).flatMap((set) => Array.from(set))
+  );
 
-    if (allSelectedIds.size === 0) {
-      console.log("No facets selected for export.");
-      return;
-    }
+  if (allSelectedIds.size === 0) {
+    console.log("No facets selected for export.");
+    return;
+  }
 
-    // Filter the original generatedFacets array to get only the selected ones
-    const facetsToExport = generatedFacets.filter((facet) =>
-      allSelectedIds.has(facet.id)
-    );
+  const facetsToExport = generatedFacets.filter((facet) =>
+    allSelectedIds.has(facet.id)
+  );
 
-    const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
+  const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
 
-    const csvRows = [
-      "Category Name,Facet Name,Possible Values,Priority,Confidence Score,Filling %",
-      ...facetsToExport.map((f) => {
-        // <-- Use facetsToExport here
-        const categoryName =
-          categoryMap.get(f.category_id) || "Unknown Category";
-        const safeValues = `"${(f.possible_values || "").replace(/"/g, '""')}"`;
-        const safeFacetName = `"${(f.facet_name || "").replace(/"/g, '""')}"`;
+  // Updated CSV header with all 9 columns
+  const csvRows = [
+    "Input Taxonomy,End Category (C3),Filter Attributes,Possible Values,Filling Percentage (Approx.),Priority (High / Medium / Low),Confidence Score (1–10),# of available sources,List the sources URL",
+    ...facetsToExport.map((f) => {
+      const categoryPath = categories.find((c) => c.id === f.category_id)?.category_path || "N/A";
+      const categoryName = categoryMap.get(f.category_id) || "Unknown Category";
+      
+      // Column A: Input Taxonomy
+      const inputTaxonomy = f["Input Taxonomy"] || f["A. Input Taxonomy"] || categoryPath;
+      
+      // Column B: End Category
+      const endCategory = f["End Category (C3)"] || f["B. End Category (C3)"] || categoryName;
+      
+      // Column C: Filter Attributes
+      const filterAttributes = f.facet_name || f["Filter Attributes"] || f["C. Filter Attributes"] || "";
+      
+      // Column D: Possible Values
+      const possibleValues = f.possible_values || f["Possible Values"] || f["D. Possible Values"] || "";
+      
+      // Column E: Filling Percentage
+      const fillingPercentage = f.filling_percentage || f["Filling Percentage (Approx.)"] || f["E. Filling Percentage (Approx.)"] || 0;
+      
+      // Column F: Priority
+      const priority = f.priority || f["Priority (High / Medium / Low)"] || f["F. Priority (High / Medium / Low)"] || "Medium";
+      
+      // Column G: Confidence Score
+      const confidenceScore = f.confidence_score || f["Confidence Score (1–10)"] || f["G. Confidence Score (1–10)"] || 5;
+      
+      // Column H: # of available sources
+      const numSources = f.num_sources || f["# of available sources"] || f["H. # of available sources"] || 0;
+      
+      // Column I: List the sources URL
+      const sourceUrls = f.source_urls || f["List the sources URL"] || f["I. List the sources URL"] || "N/A";
 
-        return [
-          `"${categoryName}"`,
-          safeFacetName,
-          safeValues,
-          f.priority,
-          f.confidence_score,
-          f.filling_percentage,
-        ].join(",");
-      }),
-    ];
+      // Properly escape values for CSV
+      const safeInputTaxonomy = `"${String(inputTaxonomy).replace(/"/g, '""')}"`;
+      const safeEndCategory = `"${String(endCategory).replace(/"/g, '""')}"`;
+      const safeFilterAttributes = `"${String(filterAttributes).replace(/"/g, '""')}"`;
+      const safePossibleValues = `"${String(possibleValues).replace(/"/g, '""')}"`;
+      const safeSourceUrls = `"${String(sourceUrls).replace(/"/g, '""')}"`;
 
-    const csv = csvRows.join("\n");
+      return [
+        safeInputTaxonomy,
+        safeEndCategory,
+        safeFilterAttributes,
+        safePossibleValues,
+        fillingPercentage,
+        priority,
+        confidenceScore,
+        numSources,
+        safeSourceUrls
+      ].join(",");
+    }),
+  ];
 
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `facets-${projectName || jobId}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+  const csv = csvRows.join("\n");
 
-    // This part remains the same
-    await supabase.from("export_history").insert({
-      // client_id: user?.client_id || user?.id,
-      job_id: jobId,
-      category_ids: Array.from(selectedCategories),
-      format: "csv",
-      exported_by: user?.id,
-    });
-  };
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `facets-${projectName || jobId}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+
+  await supabase.from("export_history").insert({
+    job_id: jobId,
+    category_ids: Array.from(selectedCategories),
+    format: "csv",
+    exported_by: user?.id,
+  });
+};
 
   if (generatedFacets.length > 0) {
     const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
@@ -497,6 +559,8 @@ console.log('🎯 API RESPONSE:', responseData);
                     {facetsForCategory.length} facets
                   </p>
                 </div>
+                <div className="overflow-x-auto">
+
                 <table className="w-full">
                   <thead className="border-b border-slate-200">
                     <tr>
@@ -518,19 +582,31 @@ console.log('🎯 API RESPONSE:', responseData);
                         />
                       </th>
                       <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                        Facet Name
+                        {columnMapping.input_taxonomy}
                       </th>
                       <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                        Possible Values
+                        {columnMapping.end_category}
                       </th>
                       <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                        Priority
+                        {columnMapping.facet_name}
                       </th>
                       <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                        Confidence
+                        {columnMapping.possible_values}
                       </th>
                       <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                        Filling %
+                        {columnMapping.filling_percentage}
+                      </th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                        {columnMapping.priority}
+                      </th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                        {columnMapping.confidence_score}
+                      </th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                        {columnMapping.num_sources}
+                      </th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                        {columnMapping.source_urls}
                       </th>
                     </tr>
                   </thead>
@@ -549,35 +625,85 @@ console.log('🎯 API RESPONSE:', responseData);
                             }
                           />
                         </td>
+                        <td className="px-6 py-4 text-sm text-slate-600 max-w-xs truncate">
+                          {facet["Input Taxonomy"] ||
+                            facet["A. Input Taxonomy"] ||
+                            categories.find((c) => c.id === categoryId)
+                              ?.category_path ||
+                            "N/A"}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-600">
+                          {facet["End Category (C3)"] ||
+                            facet["B. End Category (C3)"] ||
+                            categoryMap.get(categoryId) ||
+                            "N/A"}
+                        </td>
                         <td className="px-6 py-4 text-sm font-medium text-slate-900">
-                          {facet.facet_name}
+                          {facet.facet_name ||
+                            facet["Filter Attributes"] ||
+                            facet["C. Filter Attributes"] ||
+                            "N/A"}
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-600 max-w-md truncate">
-                          {facet.possible_values}
+                          {facet.possible_values ||
+                            facet["Possible Values"] ||
+                            facet["D. Possible Values"] ||
+                            "N/A"}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-600">
+                          {facet.filling_percentage ||
+                            facet["Filling Percentage (Approx.)"] ||
+                            facet["E. Filling Percentage (Approx.)"] ||
+                            0}
+                          %
                         </td>
                         <td className="px-6 py-4">
                           <span
                             className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              facet.priority === "High"
+                              (facet.priority ||
+                                facet["Priority (High / Medium / Low)"] ||
+                                facet["F. Priority (High / Medium / Low)"]) ===
+                              "High"
                                 ? "bg-red-100 text-red-700"
-                                : facet.priority === "Medium"
+                                : (facet.priority ||
+                                    facet["Priority (High / Medium / Low)"] ||
+                                    facet[
+                                      "F. Priority (High / Medium / Low)"
+                                    ]) === "Medium"
                                 ? "bg-yellow-100 text-yellow-700"
                                 : "bg-green-100 text-green-700"
                             }`}
                           >
-                            {facet.priority}
+                            {facet.priority ||
+                              facet["Priority (High / Medium / Low)"] ||
+                              facet["F. Priority (High / Medium / Low)"] ||
+                              "Medium"}
                           </span>
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-600">
-                          {facet.confidence_score}/10
+                          {facet.confidence_score ||
+                            facet["Confidence Score (1–10)"] ||
+                            facet["G. Confidence Score (1–10)"] ||
+                            5}
+                          /10
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-600">
-                          {facet.filling_percentage}%
+                          {facet.num_sources ||
+                            facet["# of available sources"] ||
+                            facet["H. # of available sources"] ||
+                            0}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-600 max-w-xs truncate">
+                          {facet.source_urls ||
+                            facet["List the sources URL"] ||
+                            facet["I. List the sources URL"] ||
+                            "N/A"}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+              </div>
               </div>
             )
           )}

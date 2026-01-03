@@ -20,15 +20,54 @@ interface GenerateFacetsRequest {
   prompts: PromptPayload[];
 }
 interface Facet {
-  facet_name: string;
-  possible_values: string;
-  filling_percentage: number;
-  priority: "High" | "Medium" | "Low";
-  confidence_score: number;
-  reasoning: string;
-  sort_order: number;
+  [key: string]: any; // Allow dynamic keys
 }
+function extractOutputFormat(promptContent: string): {
+  useTableFormat: boolean;
+  columns: string[];
+} {
+  // Check if the prompt asks for table/column format
+  const hasTableFormat = /OUTPUT FORMAT.*table|Column Name|Column A/is.test(promptContent);
+  
+  if (!hasTableFormat) {
+    return { useTableFormat: false, columns: [] };
+  }
 
+  // ============================================
+  // FIXED: Only extract lines that explicitly say "Column X"
+  // ============================================
+  const columnMatches = promptContent.matchAll(/^(?:Column\s+)?([A-Z])[\.\:]\s*(.+?)$/gim);
+  const columns: string[] = [];
+  
+  for (const match of columnMatches) {
+    const columnName = match[2].trim();
+    // Skip if the column name is too long (likely not a real column)
+    if (columnName.length < 100) {
+      columns.push(columnName);
+    }
+  }
+
+  // If we found proper columns, use them
+  if (columns.length >= 5) {
+    return { useTableFormat: true, columns };
+  }
+
+  // Otherwise use defaults
+  return {
+    useTableFormat: true,
+    columns: [
+      'Input Taxonomy',
+      'End Category (C3)',
+      'Filter Attributes',
+      'Possible Values',
+      'Filling Percentage (Approx.)',
+      'Priority (High / Medium / Low)',
+      'Confidence Score (1–10)',
+      '# of available sources',
+      'List the sources URL'
+    ]
+  };
+}
 // --- MODIFIED Function to call OpenAI API ---
 // This function is now flexible and can handle different system prompts and return types.
 async function generateFacetsWithAI(
@@ -82,7 +121,7 @@ ${promptTemplate}`;
   console.log("Full API Response:", JSON.stringify(data, null, 2));
 
   const content = data.choices[0].message.content;
-  console.log("Content:", data.content);
+console.log("Content:", data.choices[0].message.content);
 
 
   // --- CHANGED: Simply parse and return the entire JSON object ---
@@ -141,7 +180,16 @@ Deno.serve(async (req: Request) => {
     let processedCount = 0;
 
     // Define System Prompts once for reuse
-    const facetSystemPrompt = `You are an expert in e-commerce faceted navigation. Based on the user prompt, generate relevant facets. Your response MUST be a valid JSON object containing a single key "facets", which is an array of facet objects. Each facet object must have these keys: "facet_name", "possible_values", "filling_percentage", "priority", "confidence_score", "reasoning".`;
+    const facetSystemPrompt = `You are an expert in e-commerce faceted navigation. 
+
+CRITICAL: You must follow the EXACT output format specified in the user's prompt. 
+Look for sections like "OUTPUT FORMAT", "MANDATORY", "Column Name", or table structure instructions.
+
+Your response MUST be a valid JSON object with the structure defined in the user prompt.
+If the prompt specifies columns A, B, C, etc., your JSON should have those exact keys.
+If the prompt asks for a "facets" array, return a "facets" array.
+
+Always match the exact field names, structure, and data types requested.`;
     const contextSystemPrompt = `You are an e-commerce data analyst. Your task is to extract specific information based on the user's request. Respond ONLY with the requested JSON object.`;
 
     // --- The new orchestration loop ---
@@ -165,6 +213,7 @@ Deno.serve(async (req: Request) => {
           // Fallback if there is no path
           categoryContext["Level_1_Category_Name"] = category.name;
         }
+        
         let generatedContext: { [key: string]: any } = {};
 
         // Loop through each prompt sent from the frontend
@@ -394,132 +443,225 @@ Deno.serve(async (req: Request) => {
 
               console.log('  - Stage 1 completed: SEO meta data extracted for all levels');
             } else if (prompt.name === 'Output Format-1' && typeof prompt.content === 'string') {
-              console.log('  - Starting Stage 2: Output Format-1 prompt with SEO intelligence');
+  console.log('  - Starting Stage 2: Output Format-1 prompt with SEO intelligence');
+  
+  let template = prompt.content as string;
 
-              let template = prompt.content as string;
+  // Replace all context variables
+  Object.entries(categoryContext).forEach(([key, value]) => {
+    template = template.replace(new RegExp(`{{${key}}}`, 'g'), value);
+  });
 
-              // Replace all context variables
-              Object.entries(categoryContext).forEach(([key, value]) => {
-                template = template.replace(new RegExp(`{{${key}}}`, 'g'), value);
-              });
+  // Handle META INFORMATIONS section
+  const metaInfoRegex = /META\s+INFORMATIONS:\s*\n([\s\S]*?)(?=\n[A-Z\s]+:|\n$)/i;
+  const metaInfoMatch = template.match(metaInfoRegex);
 
-              // ========================================
-              // FIXED: Handle META INFORMATIONS section
-              // ========================================
-              const metaInfoRegex = /META\s+INFORMATIONS:\s*\n([\s\S]*?)(?=\n[A-Z\s]+:|\n$)/i;
-              const metaInfoMatch = template.match(metaInfoRegex);
+  if (metaInfoMatch && metaInfoMatch[0]) {
+    const originalMetaSection = metaInfoMatch[0];
+    const allLevels = Object.keys(generatedContext)
+      .filter(k => k.endsWith('_SEO_Meta'))
+      .map(k => parseInt(k.match(/\d+/)?.[0] || '0'))
+      .filter(n => n > 0)
+      .sort((a, b) => a - b);
 
-              if (metaInfoMatch && metaInfoMatch[0]) {
-                const originalMetaSection = metaInfoMatch[0];
+    console.log(`  - Found ${allLevels.length} levels of SEO data:`, allLevels);
 
-                // Get all available level data
-                const allLevels = Object.keys(generatedContext)
-                  .filter(k => k.endsWith('_SEO_Meta'))
-                  .map(k => parseInt(k.match(/\d+/)?.[0] || '0'))
-                  .filter(n => n > 0) // Only numbered levels
-                  .sort((a, b) => a - b); // Sort ascending: 1, 2, 3
+    let newMetaSection = "META INFORMATIONS:\n";
+    
+    if (allLevels.length === 0) {
+      if (generatedContext['Industry_SEO_Meta']) {
+        newMetaSection += JSON.stringify(generatedContext['Industry_SEO_Meta'], null, 2) + "\n";
+      } else {
+        newMetaSection += "{}\n";
+      }
+    } else {
+      for (const levelNum of allLevels) {
+        const levelData = generatedContext[`Level_${levelNum}_SEO_Meta`];
+        if (levelData) {
+          newMetaSection += `\nLevel ${levelNum} Meta:\n`;
+          newMetaSection += JSON.stringify(levelData, null, 2) + "\n";
+        }
+      }
+    }
 
-                console.log(`  - Found ${allLevels.length} levels of SEO data:`, allLevels);
+    template = template.replace(originalMetaSection, newMetaSection);
+    console.log(`  - Injected ${allLevels.length} levels into META INFORMATIONS`);
+  }
 
-                // Build complete meta section with ALL levels
-                let newMetaSection = "META INFORMATIONS:\n";
+  // Handle individual placeholder replacements
+  for (let i = 1; i <= 10; i++) {
+    const placeholder = `{{Level_${i}_Meta_JSON}}`;
+    if (template.includes(placeholder)) {
+      if (generatedContext[`Level_${i}_SEO_Meta`]) {
+        template = template.replace(
+          new RegExp(placeholder, 'g'),
+          JSON.stringify(generatedContext[`Level_${i}_SEO_Meta`], null, 2)
+        );
+      } else {
+        template = template.replace(new RegExp(placeholder, 'g'), "");
+      }
+    }
+  }
 
-                if (allLevels.length === 0) {
-                  // Fallback: use Industry_SEO_Meta if no numbered levels exist
-                  if (generatedContext['Industry_SEO_Meta']) {
-                    newMetaSection += JSON.stringify(generatedContext['Industry_SEO_Meta'], null, 2) + "\n";
-                  } else {
-                    newMetaSection += "{}\n";
-                  }
-                } else {
-                  // Include ALL levels in order
-                  for (const levelNum of allLevels) {
-                    const levelData = generatedContext[`Level_${levelNum}_SEO_Meta`];
-                    if (levelData) {
-                      newMetaSection += `\nLevel ${levelNum} Meta:\n`;
-                      newMetaSection += JSON.stringify(levelData, null, 2) + "\n";
-                    }
-                  }
-                }
+  // ============================================
+  // NEW: Extract the output format requirements
+  // ============================================
+  const formatInfo = extractOutputFormat(template);
+  console.log('  - Detected output format:', formatInfo);
+  if (formatInfo.useTableFormat && formatInfo.columns.length > 0) {
+    try {
+      await supabase
+        .from("facet_generation_jobs")
+        .update({ 
+          metadata: {
+            output_format: {
+              columns: formatInfo.columns,
+              useTableFormat: true
+            }
+          }
+        })
+        .eq("id", job_id);
+      console.log('  - Stored format metadata in job');
+    } catch (metadataError) {
+      console.error('  - Failed to store format metadata:', metadataError);
+    }
+  }
 
-                // Replace the original section
-                template = template.replace(originalMetaSection, newMetaSection);
-                console.log(`  - Injected ${allLevels.length} levels into META INFORMATIONS`);
-              }
+  // ============================================
+  // NEW: Add explicit format instructions to the template
+  // ============================================
+   let minFacets = 0;
+  let maxFacets = 0;
+if (formatInfo.useTableFormat) {
+  template += `
 
-              // ========================================
-              // Handle individual placeholder replacements (backup)
-              // ========================================
-              for (let i = 1; i <= 10; i++) {
-                const placeholder = `{{Level_${i}_Meta_JSON}}`;
-                if (template.includes(placeholder)) {
-                  if (generatedContext[`Level_${i}_SEO_Meta`]) {
-                    template = template.replace(
-                      new RegExp(placeholder, 'g'),
-                      JSON.stringify(generatedContext[`Level_${i}_SEO_Meta`], null, 2)
-                    );
-                  } else {
-                    // Remove placeholder if no data
-                    template = template.replace(new RegExp(placeholder, 'g'), "");
-                  }
-                }
-              }
+========================================
+CRITICAL OUTPUT FORMAT - READ CAREFULLY
+========================================
 
-              // Handle other generic placeholders
-              template = template.replace(/\$\{categoryName\}/g, category.name);
-              template = template.replace(/\$\{categoryPath\}/g, category.category_path || category.name);
+Your response MUST be a JSON object with this EXACT structure:
 
-              console.log(`\n${"=".repeat(80)}\n📋 FINAL OUTPUT FORMAT TEMPLATE:\n${"=".repeat(80)}\n${template.substring(0, 1500)}...\n${"=".repeat(80)}\n`);
+{
+  "facets": [
+    {
+      "${formatInfo.columns[0]}": "value here",
+      "${formatInfo.columns[1]}": "value here",
+      "${formatInfo.columns[2]}": "value here",
+      "${formatInfo.columns[3]}": "value here",
+      "${formatInfo.columns[4]}": 90,
+      "${formatInfo.columns[5]}": "High",
+      "${formatInfo.columns[6]}": 10,
+      "${formatInfo.columns[7]}": 5,
+      "${formatInfo.columns[8]}": "http://example.com"
+    }
+  ]
+}
 
-              // Execute Output Format prompt to generate facets
-              const aiResult = await generateFacetsWithAI(
-                facetSystemPrompt,
-                category.name,
-                category.category_path || category.name,
-                template
-              );
+MANDATORY RULES:
+1. Use the EXACT key names shown above - do not shorten, abbreviate, or modify them
+2. Do NOT use: "Attributes", "Values", "Priority", "Score", "Taxonomy", "Category (C3)"
+3. Do NOT use any text from the task description as key names
+4. Copy the key names character-by-character from above
+5. Each facet object must have ALL 9 keys
 
-              let facets = aiResult.facets || [];
-              console.log(`  - Initial facet generation: ${facets.length} facets`);
+INCORRECT (will fail):
+❌ "Attributes" instead of "${formatInfo.columns[2]}"
+❌ "Values" instead of "${formatInfo.columns[3]}"
+❌ "Score (1-10)" instead of "${formatInfo.columns[6]}"
 
-              // Extract required facet count
-              let minFacets = 0;
-              let maxFacets = 0;
-              const facetCountMatch = template.match(/contain\s+(\d+)–(\d+)\s+filters/i) ||
-                template.match(/contain\s+(\d+)-(\d+)\s+filters/i) ||
-                template.match(/contain\s+(\d+)\s+filters/i);
+CORRECT:
+✅ "${formatInfo.columns[2]}"
+✅ "${formatInfo.columns[3]}"
+✅ "${formatInfo.columns[6]}"
 
-              if (facetCountMatch) {
-                if (facetCountMatch.length >= 3) {
-                  minFacets = parseInt(facetCountMatch[1], 10);
-                  maxFacets = parseInt(facetCountMatch[2], 10);
-                } else if (facetCountMatch.length >= 2) {
-                  minFacets = parseInt(facetCountMatch[1], 10);
-                  maxFacets = minFacets;
-                }
-              }
+Generate ${minFacets || 15}-${maxFacets || 20} facets using this exact format.
+`;
+}
 
-              // Trim if too many
-              if (maxFacets > 0 && facets.length > maxFacets) {
-                console.log(`  - Trimming from ${facets.length} to ${maxFacets} facets`);
-                const priorityOrder = { "High": 1, "Medium": 2, "Low": 3 };
-                facets.sort((a, b) => {
-                  const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
-                  if (priorityDiff !== 0) return priorityDiff;
-                  return b.confidence_score - a.confidence_score;
-                });
-                facets = facets.slice(0, maxFacets);
-              }
+  console.log(`\n${"=".repeat(80)}\n📋 FINAL OUTPUT FORMAT TEMPLATE:\n${"=".repeat(80)}\n${template.substring(0, 2000)}...\n${"=".repeat(80)}\n`);
 
-              // Request more if insufficient
-              if (minFacets > 0 && facets.length < minFacets) {
-                console.log(`  - Requesting ${minFacets - facets.length} additional facets...`);
+  // Execute Output Format prompt
+  const aiResult = await generateFacetsWithAI(
+    facetSystemPrompt,
+    category.name,
+    category.category_path || category.name,
+    template
+  );
 
-                const additionalPrompt = `
+  let facets = aiResult.facets || [];
+  console.log(`  - Initial facet generation: ${facets.length} facets`);
+
+  // ============================================
+  // NEW: Validate format compliance
+  // ============================================
+  if (formatInfo.useTableFormat && facets.length > 0) {
+    const firstFacet = facets[0];
+    const expectedKeys = formatInfo.columns;
+    const actualKeys = Object.keys(firstFacet);
+    
+    console.log('  - Expected columns:', expectedKeys);
+    console.log('  - Actual columns:', actualKeys);
+    
+    // If format doesn't match, transform it
+    if (!expectedKeys.every(key => actualKeys.includes(key))) {
+      console.log('  - Format mismatch detected, transforming data...');
+      facets = facets.map(facet => {
+        const transformed: any = {};
+        transformed[formatInfo.columns[0]] = category.category_path || category.name; // Input Taxonomy
+        transformed[formatInfo.columns[1]] = category.name; // End Category
+        transformed[formatInfo.columns[2]] = facet.facet_name || facet[formatInfo.columns[2]] || '';
+        transformed[formatInfo.columns[3]] = facet.possible_values || facet[formatInfo.columns[3]] || '';
+        transformed[formatInfo.columns[4]] = facet.filling_percentage || facet[formatInfo.columns[4]] || 0;
+        transformed[formatInfo.columns[5]] = facet.priority || facet[formatInfo.columns[5]] || 'Medium';
+        transformed[formatInfo.columns[6]] = facet.confidence_score || facet[formatInfo.columns[6]] || 5;
+        transformed[formatInfo.columns[7]] = facet['# of available sources'] || 0;
+        transformed[formatInfo.columns[8]] = facet['List the sources URL'] || 'N/A';
+        return transformed;
+      });
+      console.log('  - Format transformation complete');
+    }
+  }
+
+  // Extract required facet count
+ 
+  const facetCountMatch = template.match(/contain\s+(\d+)–(\d+)\s+filters/i) ||
+    template.match(/contain\s+(\d+)-(\d+)\s+filters/i) ||
+    template.match(/contain\s+(\d+)\s+filters/i);
+
+  if (facetCountMatch) {
+    if (facetCountMatch.length >= 3) {
+      minFacets = parseInt(facetCountMatch[1], 10);
+      maxFacets = parseInt(facetCountMatch[2], 10);
+    } else if (facetCountMatch.length >= 2) {
+      minFacets = parseInt(facetCountMatch[1], 10);
+      maxFacets = minFacets;
+    }
+  }
+
+  // Trim if too many
+  if (maxFacets > 0 && facets.length > maxFacets) {
+    console.log(`  - Trimming from ${facets.length} to ${maxFacets} facets`);
+    const priorityOrder = { "High": 1, "Medium": 2, "Low": 3 };
+    facets.sort((a, b) => {
+      const priorityKey = formatInfo.columns[5] || 'priority';
+      const confidenceKey = formatInfo.columns[6] || 'confidence_score';
+      const priorityDiff = priorityOrder[a[priorityKey]] - priorityOrder[b[priorityKey]];
+      if (priorityDiff !== 0) return priorityDiff;
+      return b[confidenceKey] - a[confidenceKey];
+    });
+    facets = facets.slice(0, maxFacets);
+  }
+
+  // Request more if insufficient
+  if (minFacets > 0 && facets.length < minFacets) {
+    console.log(`  - Requesting ${minFacets - facets.length} additional facets...`);
+    
+    const filterAttrKey = formatInfo.columns[2] || 'facet_name';
+    const additionalPrompt = `
 You previously generated ${facets.length} facets for ${category.name}. 
 You MUST generate AT LEAST ${minFacets - facets.length} MORE UNIQUE facets.
 
-Current facets: ${facets.map(f => f.facet_name).join(', ')}
+Current facets: ${facets.map(f => f[filterAttrKey]).join(', ')}
 
 Focus on:
 - Product capabilities and features
@@ -528,36 +670,37 @@ Focus on:
 - Application-specific attributes
 - Certifications and standards
 
-Follow the same JSON format.
+Follow the EXACT same JSON format as before with these columns:
+${formatInfo.columns.join(', ')}
 `;
 
-                const additionalResult = await generateFacetsWithAI(
-                  facetSystemPrompt,
-                  category.name,
-                  category.category_path || category.name,
-                  additionalPrompt
-                );
+    const additionalResult = await generateFacetsWithAI(
+      facetSystemPrompt,
+      category.name,
+      category.category_path || category.name,
+      additionalPrompt
+    );
 
-                if (additionalResult.facets && Array.isArray(additionalResult.facets)) {
-                  const existingNames = new Set(facets.map(f => f.facet_name));
-                  const uniqueNew = additionalResult.facets.filter(
-                    f => !existingNames.has(f.facet_name)
-                  );
-                  console.log(`  - Added ${uniqueNew.length} unique facets`);
-                  facets = [...facets, ...uniqueNew];
-                }
-              }
+    if (additionalResult.facets && Array.isArray(additionalResult.facets)) {
+      const existingNames = new Set(facets.map(f => f[filterAttrKey]));
+      const uniqueNew = additionalResult.facets.filter(
+        f => !existingNames.has(f[filterAttrKey])
+      );
+      console.log(`  - Added ${uniqueNew.length} unique facets`);
+      facets = [...facets, ...uniqueNew];
+    }
+  }
 
-              // Add facets to category collection
-              if (Array.isArray(facets)) {
-                facets.forEach(facet => categoryFacets.push({
-                  ...facet,
-                  source_prompt: 'Output Format-1 (with SEO intelligence)'
-                }));
-              }
-
-              console.log(`  - Stage 2 completed: ${facets.length} total facets`);
-            }
+  // Add facets to category collection
+  if (Array.isArray(facets)) {
+    facets.forEach(facet => categoryFacets.push({
+      ...facet,
+      source_prompt: 'Output Format-1 (with SEO intelligence)'
+    }));
+  }
+  
+  console.log(`  - Stage 2 completed: ${facets.length} total facets`);
+}
             else {
   // Handle any other standard prompts (if any exist)
   console.log(`  - Processing standard prompt: ${prompt.name}`);
@@ -594,33 +737,142 @@ Follow the same JSON format.
           }
         }
 
-        for (const rawFacet of categoryFacets) {
-          const cleanFacet = {
-            ...rawFacet,
-            confidence_score: Math.round(
-              Math.max(1, Math.min(10, Number(rawFacet.confidence_score) || 0))
-            ),
+   // Replace the facet mapping section in your index.ts (around line 315)
+// This is the section that maps raw AI response to database fields
 
-            filling_percentage: Math.round(
-              Math.max(
-                0,
-                Math.min(
-                  100,
-                  Number(rawFacet.filling_percentage) < 1
-                    ? Number(rawFacet.filling_percentage) * 100
-                    : Number(rawFacet.filling_percentage) || 0
-                )
-              )
-            ),
-          };
-          allFacetsToInsert.push({
-            job_id,
-            category_id: category.id,
-            client_id: job.client_id,
-            prompt_used: selectedPromptIds.join(", "),
-            ...cleanFacet,
-          });
-        }
+for (const rawFacet of categoryFacets) {
+  console.log('DEBUG: Raw facet keys:', Object.keys(rawFacet));
+  
+  // ============================================
+  // Map ALL columns including H and I
+  // ============================================
+  const inputTaxonomy = 
+    rawFacet['Input Taxonomy'] ||
+    rawFacet['A. Input Taxonomy'] ||
+    rawFacet['A'] ||
+    '';
+
+  const endCategory = 
+    rawFacet['End Category (C3)'] ||
+    rawFacet['B. End Category (C3)'] ||
+    rawFacet['B'] ||
+    '';
+    
+  const facetName = 
+    rawFacet['Filter Attributes'] ||
+    rawFacet['C. Filter Attributes'] ||
+    rawFacet['C'] ||
+    rawFacet['Attributes'] ||
+    rawFacet.facet_name || 
+    '';
+    
+  const possibleValues = 
+    rawFacet['Possible Values'] ||
+    rawFacet['D. Possible Values'] ||
+    rawFacet['D'] ||
+    rawFacet['Values'] ||
+    rawFacet.possible_values || 
+    '';
+    
+  const fillingPercentage = 
+    rawFacet['Filling Percentage (Approx.)'] ||
+    rawFacet['E. Filling Percentage (Approx.)'] ||
+    rawFacet['E'] ||
+    rawFacet['Percentage (Approx.)'] ||
+    rawFacet.filling_percentage || 
+    '';
+    
+  const priority = 
+    rawFacet['Priority (High / Medium / Low)'] ||
+    rawFacet['F. Priority (High / Medium / Low)'] ||
+    rawFacet['F'] ||
+    rawFacet['Priority'] ||
+    rawFacet.priority || 
+    'Medium';
+    
+  const confidenceScore = 
+    rawFacet['Confidence Score (1–10)'] ||
+    rawFacet['G. Confidence Score (1–10)'] ||
+    rawFacet['G'] ||
+    rawFacet['Score (1-10)'] ||
+    rawFacet['Score (1–10)'] ||
+    rawFacet.confidence_score || 
+    5;
+
+  // ============================================
+  // NEW: Extract columns H and I
+  // ============================================
+  const numSources = 
+    rawFacet['# of available sources'] ||
+    rawFacet['H. # of available sources'] ||
+    rawFacet['H'] ||
+    rawFacet.num_sources ||
+    0;
+
+  const sourceUrls = 
+    rawFacet['List the sources URL'] ||
+    rawFacet['I. List the sources URL'] ||
+    rawFacet['I'] ||
+    rawFacet.source_urls ||
+    'N/A';
+
+  // ============================================
+  // Skip malformed facets
+  // ============================================
+  const hasLongKeys = Object.keys(rawFacet).some(k => k.length > 100);
+  if (!facetName || facetName.trim() === '' || hasLongKeys) {
+    console.warn('WARNING: Skipping malformed facet:', Object.keys(rawFacet)[0].substring(0, 50));
+    continue;
+  }
+
+  // Clean percentage (remove % if present)
+  let cleanFillingPercentage = fillingPercentage;
+  if (typeof fillingPercentage === 'string') {
+    cleanFillingPercentage = parseFloat(fillingPercentage.replace('%', '')) || 0;
+  }
+    
+  const reasoning = rawFacet.reasoning || '';
+  
+  const cleanFacet = {
+    facet_name: facetName,
+    possible_values: typeof possibleValues === 'object' ? JSON.stringify(possibleValues) : String(possibleValues),
+    confidence_score: Math.round(
+      Math.max(1, Math.min(10, Number(confidenceScore) || 5))
+    ),
+    filling_percentage: Math.round(
+      Math.max(
+        0,
+        Math.min(
+          100,
+          Number(cleanFillingPercentage) < 1
+            ? Number(cleanFillingPercentage) * 100
+            : Number(cleanFillingPercentage) || 0
+        )
+      )
+    ),
+    priority: priority as "High" | "Medium" | "Low",
+    reasoning: reasoning,
+    // ============================================
+    // NEW: Include all fields in cleanFacet
+    // ============================================
+    input_taxonomy: inputTaxonomy,
+    end_category: endCategory,
+    num_sources: Number(numSources) || 0,
+    source_urls: String(sourceUrls)
+  };
+  
+  console.log('DEBUG: Mapped facet:', cleanFacet.facet_name);
+  console.log('DEBUG: num_sources:', cleanFacet.num_sources);
+  console.log('DEBUG: source_urls:', cleanFacet.source_urls);
+  
+  allFacetsToInsert.push({
+    job_id,
+    category_id: category.id,
+    client_id: job.client_id,
+    prompt_used: selectedPromptIds.join(", "),
+    ...cleanFacet,
+  });
+}
 
         processedCount++;
         const progress = Math.round(
