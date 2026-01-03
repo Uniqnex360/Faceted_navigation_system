@@ -552,7 +552,7 @@ Your response MUST be a JSON object with this EXACT structure:
       "${formatInfo.columns[5]}": "High",
       "${formatInfo.columns[6]}": 10,
       "${formatInfo.columns[7]}": 5,
-      "${formatInfo.columns[8]}": "http://example.com"
+      "${formatInfo.columns[8]}": "value here",
     }
   ]
 }
