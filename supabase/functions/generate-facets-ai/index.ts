@@ -107,7 +107,7 @@ ${promptTemplate}`;
         { role: "user", content: userPrompt },
       ],
       temperature: 0.5,
-      response_format: { type: "json_object" }, // Enforce JSON output for reliability
+      response_format: { type: "json_object" }, 
     }),
   });
 
@@ -349,8 +349,8 @@ Always match the exact field names, structure, and data types requested.`;
           console.log(`DEBUG: Received prompt object: ${JSON.stringify(prompt, null, 2)}`);
           try {
             // STAGE 1: Industry Keywords (Single Level SEO Extraction)
-            if (prompt.name === 'Industry Keywords' && typeof prompt.content === 'string') {
-              console.log('  - Starting Stage 1: Industry Keywords SEO extraction');
+            if (prompt.name === 'Industry Analysis' && typeof prompt.content === 'string') {
+              console.log('  - Starting Stage 1: Industry Analysis SEO extraction');
 
               // Process main template (Level 1)
               let template = prompt.content as string;
@@ -424,14 +424,11 @@ Always match the exact field names, structure, and data types requested.`;
                     levelTemplate
                   );
 
-                  // Store this level's results
                   generatedContext[`Level_${levelNum}_SEO_Meta`] = levelSeoData;
                   console.log(`\n${"=".repeat(40)}\nLEVEL ${levelNum} OUTPUT (passed to next level):\n${"=".repeat(40)}\n${JSON.stringify(levelSeoData, null, 2)}\n${"=".repeat(40)}\n`);
 
-                  // Update the latest result for the next level to use
                   generatedContext['Latest_Level_Result'] = levelSeoData;
 
-                  // For the final level, this becomes our SEO metadata for Stage 2
                   if (levelNum === Math.max(...sortedLevels)) {
                     generatedContext['Industry_SEO_Meta'] = {
                       ...generatedContext['Industry_SEO_Meta'],
@@ -442,17 +439,15 @@ Always match the exact field names, structure, and data types requested.`;
               }
 
               console.log('  - Stage 1 completed: SEO meta data extracted for all levels');
-            } else if (prompt.name === 'Output Format-1' && typeof prompt.content === 'string') {
-  console.log('  - Starting Stage 2: Output Format-1 prompt with SEO intelligence');
+            } else if (prompt.name === 'Master Prompt' && typeof prompt.content === 'string') {
+  console.log('  - Starting Stage 2: Master Prompt prompt with SEO intelligence');
   
   let template = prompt.content as string;
 
-  // Replace all context variables
   Object.entries(categoryContext).forEach(([key, value]) => {
     template = template.replace(new RegExp(`{{${key}}}`, 'g'), value);
   });
 
-  // Handle META INFORMATIONS section
   const metaInfoRegex = /META\s+INFORMATIONS:\s*\n([\s\S]*?)(?=\n[A-Z\s]+:|\n$)/i;
   const metaInfoMatch = template.match(metaInfoRegex);
 
@@ -488,7 +483,6 @@ Always match the exact field names, structure, and data types requested.`;
     console.log(`  - Injected ${allLevels.length} levels into META INFORMATIONS`);
   }
 
-  // Handle individual placeholder replacements
   for (let i = 1; i <= 10; i++) {
     const placeholder = `{{Level_${i}_Meta_JSON}}`;
     if (template.includes(placeholder)) {
@@ -503,9 +497,7 @@ Always match the exact field names, structure, and data types requested.`;
     }
   }
 
-  // ============================================
-  // NEW: Extract the output format requirements
-  // ============================================
+
   const formatInfo = extractOutputFormat(template);
   console.log('  - Detected output format:', formatInfo);
   if (formatInfo.useTableFormat && formatInfo.columns.length > 0) {
@@ -527,9 +519,7 @@ Always match the exact field names, structure, and data types requested.`;
     }
   }
 
-  // ============================================
-  // NEW: Add explicit format instructions to the template
-  // ============================================
+
    let minFacets = 0;
   let maxFacets = 0;
 if (formatInfo.useTableFormat) {
@@ -695,7 +685,7 @@ ${formatInfo.columns.join(', ')}
   if (Array.isArray(facets)) {
     facets.forEach(facet => categoryFacets.push({
       ...facet,
-      source_prompt: 'Output Format-1 (with SEO intelligence)'
+      source_prompt: 'Master Prompt (with SEO intelligence)'
     }));
   }
   

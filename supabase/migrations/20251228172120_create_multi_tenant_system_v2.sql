@@ -235,7 +235,7 @@ INSERT INTO export_templates (platform, name, format, field_mapping, template_st
 ON CONFLICT DO NOTHING;
 
 INSERT INTO prompt_templates (name, level, type, template_content, variables, execution_order) VALUES
-('Industry Keywords - Marine', 1, 'industry', 'Analyze {category} in the marine industry. Focus on: boat equipment, marine safety, navigation, water sports.', '{"category": "string"}'::jsonb, 1),
+('Industry Analysis - Marine', 1, 'industry', 'Analyze {category} in the marine industry. Focus on: boat equipment, marine safety, navigation, water sports.', '{"category": "string"}'::jsonb, 1),
 ('Geography - US Market', 2, 'geography', 'Consider US market preferences for {category}. Include: USCG regulations, imperial measurements, regional terminology.', '{"category": "string"}'::jsonb, 2),
 ('Geography - EU Market', 2, 'geography', 'Consider EU market preferences for {category}. Include: CE certifications, metric measurements, multilingual terms.', '{"category": "string"}'::jsonb, 3),
 ('Business Rules - Conversion', 3, 'business_rules', 'Generate facets that maximize conversion for {category}. Prioritize: compatibility filters, safety certifications, size/fit accuracy.', '{"category": "string"}'::jsonb, 4),

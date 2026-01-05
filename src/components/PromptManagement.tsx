@@ -1,17 +1,30 @@
 import { useState, useEffect } from "react";
-import { Edit2, History, Star, Save, Plus, Copy, X } from "lucide-react";
+import {
+  Edit2,
+  History,
+  Star,
+  Save,
+  Plus,
+  Copy,
+  X,
+  RotateCcw,
+} from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { PromptTemplate } from "../types";
 import { geographyCountries } from "../utils/CountrySelector";
 import { PROMPT_EXECUTION_ORDER } from "../utils/PromptOrder";
+import { useToast } from "../contexts/ToastContext";
 
 export default function PromptManagement() {
+  const toast = useToast();
+
   const { user } = useAuth();
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
   const [selectedPrompt, setSelectedPrompt] = useState<PromptTemplate | null>(
     null
   );
+  const [isRestoring, setIsRestoring] = useState(false);
   const [editContent, setEditContent] = useState("");
   const [changeNotes, setChangeNotes] = useState("");
   const [isEditing, setIsEditing] = useState(false);
@@ -51,11 +64,7 @@ export default function PromptManagement() {
       // Fetch versions and the email of the user who edited it
       const { data, error } = await supabase
         .from("prompt_versions")
-        .select(
-          `
-          *,
-        `
-        )
+        .select(`*`)
         .eq("prompt_template_id", prompt.id)
         .order("version", { ascending: false }); // Show newest first
 
@@ -99,7 +108,57 @@ export default function PromptManagement() {
       setPrompts(sortedPrompts);
     }
   };
-
+  const restoreVersion = (versionToRestore: any) => {
+    if (!selectedPrompt || !user) return;
+    toast.confirm(
+      `Restore v${versionToRestore.version}? This creates a new version.`,
+      async () => {
+        setIsRestoring(true);
+        try {
+          const newVersionNumber = (selectedPrompt.current_version || 0) + 1;
+          const metadataToRestore =
+            versionToRestore.metadata || selectedPrompt.metadata || {};
+          const { error: insertError } = await supabase
+            .from("prompt_versions")
+            .insert({
+              prompt_template_id: selectedPrompt.id,
+              version: newVersionNumber,
+              template_content: versionToRestore.template_content,
+              variables: versionToRestore.variables,
+              edited_by: user.id,
+              metadata: metadataToRestore,
+              change_notes: `Restored from Version ${versionToRestore.version}`,
+              is_active: true,
+            });
+          if (insertError) throw insertError;
+          await supabase
+            .from("prompt_versions")
+            .update({ is_active: false })
+            .eq("prompt_template_id", selectedPrompt.id)
+            .neq("version", newVersionNumber);
+          const { error: parentError } = await supabase
+            .from("prompt_templates")
+            .update({
+              template: versionToRestore.template_content,
+              current_version: newVersionNumber,
+              metadata: metadataToRestore,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", selectedPrompt.id);
+          if (parentError) throw parentError;
+          toast.success(`Restored successfully as v${newVersionNumber}`);
+          setIsHistoryModalOpen(false);
+          await loadPrompts();
+        } catch (error: any) {
+          console.error("Error restoring version", error);
+          toast.error(`Failed to restore ${error.message}`);
+        } finally {
+          setIsRestoring(false);
+        }
+      },
+      { confirmText: "Yes,Restore", cancelText: "Cancel" }
+    );
+  };
   const copyText = async (text: string, key: string) => {
     if (!text) {
       alert("There is no content to copy.");
@@ -144,11 +203,21 @@ export default function PromptManagement() {
       await loadPrompts();
     } catch (error: any) {
       console.error("Error creating prompt:", error);
+      toast.error("Prompt created successfully!");
       setError(`Failed to create prompt: ${error.message}`);
     } finally {
       setIsSaving(false);
     }
   };
+  const hasChanges=selectedPrompt ? (()=>{
+    if(editContent!==selectedPrompt.template)return true 
+    if(selectedPrompt.name==='Industry Analysis')
+    {
+      const originalLevels=(selectedPrompt.metadata as any)?.industry_levels||{}
+      return JSON.stringify(industryLevels)!==JSON.stringify(originalLevels)
+    }
+    return false
+  })():false
   const editPrompt = (prompt: PromptTemplate) => {
     setError(null);
     setSelectedPrompt(prompt);
@@ -156,7 +225,7 @@ export default function PromptManagement() {
     setChangeNotes("");
     setIsEditing(true);
     setIndustryLevels({});
-    if (prompt.name === "Industry Keywords") {
+    if (prompt.name === "Industry Analysis") {
       const levelsFromMetadata =
         (prompt.metadata as any)?.industry_levels || {};
       setIndustryLevels(levelsFromMetadata);
@@ -227,7 +296,7 @@ export default function PromptManagement() {
       // if (selectedPrompt.name === "Geography") {
       //   versionContent = JSON.stringify(countryTemplates, null, 2);
       // }
-
+      let metadataToSave={...(selectedPrompt.metadata||{})}
       await supabase.from("prompt_versions").insert({
         prompt_template_id: selectedPrompt.id,
         version: newVersion,
@@ -267,25 +336,49 @@ export default function PromptManagement() {
       //     (level) => level.trim() !== ""
       //   );
       // }
-      if (selectedPrompt.name === "Industry Keywords") {
+      if (selectedPrompt.name === "Industry Analysis") {
         // Only include non-empty levels
         const nonEmptyLevels = Object.fromEntries(
           Object.entries(industryLevels).filter(
             ([_, content]) => content.trim() !== ""
           )
         );
-        templateUpdate.metadata.industry_levels = nonEmptyLevels;
+        metadataToSave.industry_levels = nonEmptyLevels;
       }
-      const { error: templateUpdateError } = await supabase
+      const { error: versionError } = await supabase.from("prompt_versions").insert({
+        prompt_template_id: selectedPrompt.id,
+        version: newVersion,
+        template_content: versionContent,
+        variables: selectedPrompt.variables,
+        metadata: metadataToSave, 
+        edited_by: user.id,
+        change_notes: changeNotes,
+        is_active: true,
+      });
+      if(versionError) throw versionError
+       await supabase
+        .from("prompt_versions")
+        .update({ is_active: false })
+        .eq("prompt_template_id", selectedPrompt.id)
+        .neq("version", newVersion);
+
+       const { error: templateUpdateError } = await supabase
         .from("prompt_templates")
-        .update(templateUpdate)
+        .update({
+          template: versionContent,
+          current_version: newVersion,
+          updated_at: new Date().toISOString(),
+          metadata: metadataToSave, 
+        })
         .eq("id", selectedPrompt.id);
       if (templateUpdateError) throw templateUpdateError;
-
+      toast.success("New version saved successfully");
       setIsEditing(false);
       setSelectedPrompt(null);
-      await loadPrompts();
+      await loadPrompts()
+
     } catch (error: any) {
+      toast.error(`Save failed: ${error.message}`);
       console.error("Error saving prompt version:", error);
       setError(`Save failed: ${error.message}`);
     } finally {
@@ -330,15 +423,14 @@ export default function PromptManagement() {
           Prompt Template Management
         </h2>
         {!isEditing && (
-<button
-          onClick={() => setIsCreateModalOpen(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          New Prompt
-        </button>
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            New Prompt
+          </button>
         )}
-        
       </div>
       {isEditing && selectedPrompt ? (
         <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
@@ -350,7 +442,7 @@ export default function PromptManagement() {
             {true && (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  {selectedPrompt.name === "Industry Keywords"
+                  {selectedPrompt.name === "Industry Analysis"
                     ? "Level 1 Keywords"
                     : "Template Content"}
                 </label>
@@ -422,72 +514,81 @@ export default function PromptManagement() {
             )} */}
 
             {/* UI for Marine Keywords (Levels 2-6) */}
-            {selectedPrompt.name === "Industry Keywords" && (
-  <div>
-    <div className="flex justify-between items-center mb-4">
-      <label className="block text-sm font-medium text-slate-700">
-        Sub-Level Templates
-      </label>
-      <button
-        onClick={addIndustryLevel}
-        className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors text-sm"
-      >
-        <Plus className="w-3 h-3" /> Add Level
-      </button>
-    </div>
-    
-    {Object.keys(industryLevels).length === 0 && (
-      <p className="text-sm text-slate-500 italic mb-4">
-        No sub-levels defined. Click "Add Level" to create additional processing levels.
-      </p>
-    )}
-    
-    <div className="space-y-6">
-      {Object.entries(industryLevels).map(([level, content]) => (
-        <div key={level} className="border border-slate-200 rounded-lg p-4 relative">
-          <div className="flex justify-between items-center mb-3">
-            <label className="block text-sm font-medium text-slate-700">
-              Level {level}
-            </label>
-            <button
-              onClick={() => removeIndustryLevel(Number(level))}
-              className="text-red-500 hover:text-red-700"
-              title="Remove this level"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          
-          <div className="relative mb-1">
-            <button
-              onClick={() => copyText(content, `level-${level}`)}
-              className="text-xs inline-flex items-center gap-1 text-slate-500 hover:text-slate-800"
-            >
-              <Copy className="w-3 h-3" /> Copy
-            </button>
-            {copiedKey === `level-${level}` && (
-              <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-slate-800 text-white text-xs rounded py-1 px-2">
-                Copied!
-              </span>
-            )}
-          </div>
-          
-          <textarea
-            value={content}
-            onChange={(e) => handleIndustryLevelChange(Number(level), e.target.value)}
-            rows={8}
-            placeholder={`Enter template for level ${level}...`}
-            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
-          />
-          
-          {/* <div className="mt-2 text-xs text-slate-500">
+            {selectedPrompt.name === "Industry Analysis" && (
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <label className="block text-sm font-medium text-slate-700">
+                    Sub-Level Templates
+                  </label>
+                  <button
+                    onClick={addIndustryLevel}
+                    className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors text-sm"
+                  >
+                    <Plus className="w-3 h-3" /> Add Level
+                  </button>
+                </div>
+
+                {Object.keys(industryLevels).length === 0 && (
+                  <p className="text-sm text-slate-500 italic mb-4">
+                    No sub-levels defined. Click "Add Level" to create
+                    additional processing levels.
+                  </p>
+                )}
+
+                <div className="space-y-6">
+                  {Object.entries(industryLevels).map(([level, content]) => (
+                    <div
+                      key={level}
+                      className="border border-slate-200 rounded-lg p-4 relative"
+                    >
+                      <div className="flex justify-between items-center mb-3">
+                        <label className="block text-sm font-medium text-slate-700">
+                          Level {level}
+                        </label>
+                        <button
+                          onClick={() => removeIndustryLevel(Number(level))}
+                          className="text-red-500 hover:text-red-700"
+                          title="Remove this level"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <div className="relative mb-1">
+                        <button
+                          onClick={() => copyText(content, `level-${level}`)}
+                          className="text-xs inline-flex items-center gap-1 text-slate-500 hover:text-slate-800"
+                        >
+                          <Copy className="w-3 h-3" /> Copy
+                        </button>
+                        {copiedKey === `level-${level}` && (
+                          <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-slate-800 text-white text-xs rounded py-1 px-2">
+                            Copied!
+                          </span>
+                        )}
+                      </div>
+
+                      <textarea
+                        value={content}
+                        onChange={(e) =>
+                          handleIndustryLevelChange(
+                            Number(level),
+                            e.target.value
+                          )
+                        }
+                        rows={8}
+                        placeholder={`Enter template for level ${level}...`}
+                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                      />
+
+                      {/* <div className="mt-2 text-xs text-slate-500">
             <p>You can use <code className="bg-slate-100 px-1 py-0.5 rounded">{"${previousLevelResult}"}</code> to reference results from previous levels.</p>
           </div> */}
-        </div>
-      ))}
-    </div>
-  </div>
-)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Change Notes and Save Buttons */}
             <div>
@@ -503,15 +604,18 @@ export default function PromptManagement() {
               />
             </div>
 
-            <div className="flex gap-3">
-              <button
-                onClick={savePromptVersion}
-                disabled={isSaving}
-                className="inline-flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-              >
-                <Save className="w-4 h-4" />
-                {isSaving ? "Saving..." : "Save New Version"}
-              </button>
+                        <div className="flex gap-3">
+              {hasChanges && (
+                <button
+                  onClick={savePromptVersion}
+                  disabled={isSaving}
+                  className="inline-flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  <Save className="w-4 h-4" />
+                  {isSaving ? "Saving..." : "Save New Version"}
+                </button>
+              )}
+              
               <button
                 onClick={() => {
                   setIsEditing(false);
@@ -520,7 +624,8 @@ export default function PromptManagement() {
                 }}
                 className="px-6 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
               >
-                Cancel
+                {hasChanges ? "Cancel" : "Close"} 
+                {/* Changed text to 'Close' if no changes, just for better UX */}
               </button>
             </div>
           </div>
@@ -545,9 +650,7 @@ export default function PromptManagement() {
                 <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
                   Level
                 </th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                  Type
-                </th>
+              
                 <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
                   Version
                 </th>
@@ -568,11 +671,7 @@ export default function PromptManagement() {
                   <td className="px-6 py-4 text-sm text-slate-600">
                     Level {prompt.level}
                   </td>
-                  <td className="px-6 py-4">
-                    <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
-                      {prompt.type}
-                    </span>
-                  </td>
+                
                   <td className="px-6 py-4 text-sm text-slate-600">
                     v{prompt.current_version || 1}
                   </td>
@@ -726,46 +825,109 @@ export default function PromptManagement() {
                 <p className="text-center text-slate-500">Loading history...</p>
               ) : (
                 <div className="space-y-6">
-                  {promptVersions.map((version, index) => (
-                    <div
-                      key={version.id}
-                      className="border border-slate-200 rounded-lg"
-                    >
-                      <div className="bg-slate-50 p-3 flex justify-between items-center text-sm border-b">
-                        <div className="font-semibold">
-                          Version {version.version}
-                          {index === 0 && (
-                            <span className="ml-2 text-xs font-medium bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
-                              Latest
+                  {promptVersions.map((version, index) => {
+                    const isLatest = index === 0;
+                    return (
+                      <div
+                        key={version.id}
+                        className={`border rounded-lg transition-all ${
+                          isLatest
+                            ? "border-blue-300 ring-1 ring-blue-100"
+                            : "border-slate-200"
+                        }`}
+                      >
+                        <div className="bg-slate-50 p-3 flex justify-between items-center text-sm border-b rounded-t-lg">
+                          <div className="flex items-center gap-3">
+                            <span className="font-semibold text-slate-900">
+                              Version {version.version}
                             </span>
-                          )}
+                            {isLatest ? (
+                              <span className="text-xs font-medium bg-green-100 text-green-700 px-2 py-0.5 rounded-full border border-green-200">
+                                Current Active
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-500">
+                                {new Date(
+                                  version.created_at
+                                ).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-4">
+                            <div className="text-slate-500 hidden sm:block">
+                              <span className="font-medium">By:</span>{" "}
+                              {version.users?.email || "Unknown"}
+                            </div>
+
+                            {/* RESTORE BUTTON - Only show if not the latest version */}
+                            {!isLatest && (
+                              <button
+                                onClick={() => restoreVersion(version)}
+                                disabled={isRestoring}
+                                className="flex items-center gap-1 text-xs font-medium bg-white border border-slate-300 text-slate-700 px-3 py-1.5 rounded hover:bg-slate-100 hover:text-blue-600 transition-colors shadow-sm"
+                                title="Restore this version"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                {isRestoring ? "Restoring..." : "Restore"}
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <div className="text-slate-500">
-                          <span className="font-medium">By:</span>{" "}
-                          {version.users?.email || "Unknown User"} on{" "}
-                          {new Date(version.created_at).toLocaleString()}
+
+                        <div className="p-4 space-y-3 bg-white rounded-b-lg">
+                          <div>
+                            <h4 className="font-semibold text-slate-800 text-xs uppercase tracking-wider mb-1">
+                              Change Notes
+                            </h4>
+                            <p className="text-sm text-slate-600 italic">
+                              {version.change_notes || "No notes provided."}
+                            </p>
+                          </div>
+                          <div>
+                            <h4 className="font-semibold text-slate-800 text-xs uppercase tracking-wider mb-1 flex justify-between">
+                              <span>Template Content</span>
+                              <button
+                                onClick={() =>
+                                  copyText(
+                                    version.template_content,
+                                    `v-${version.version}`
+                                  )
+                                }
+                                className="text-blue-600 hover:text-blue-800 normal-case font-normal flex items-center gap-1"
+                              >
+                                <Copy className="w-3 h-3" /> Copy
+                              </button>
+                            </h4>
+                            <div className="relative">
+                              <pre className="bg-slate-50 border border-slate-100 p-3 rounded-md text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-60">
+                                {version.template_content}
+                              </pre>
+{version.metadata?.industry_levels && Object.keys(version.metadata.industry_levels).length > 0 && (
+  <div className="mt-3 border-t border-slate-100 pt-3">
+    <h4 className="font-semibold text-slate-800 text-xs uppercase tracking-wider mb-2">
+      Included Sub-Levels
+    </h4>
+    <div className="flex flex-wrap gap-2">
+      {Object.keys(version.metadata.industry_levels).map((lvl) => (
+        <span key={lvl} className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded border border-slate-200">
+          Level {lvl}
+        </span>
+      ))}
+    </div>
+  </div>
+)}
+                              {copiedKey === `v-${version.version}` && (
+                                <span className="absolute top-2 right-2 bg-slate-800 text-white text-[10px] rounded py-0.5 px-1.5 opacity-90">
+                                  Copied
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
-                      <div className="p-4 space-y-3">
-                        <div>
-                          <h4 className="font-semibold text-slate-800 text-xs uppercase tracking-wider mb-1">
-                            Change Notes
-                          </h4>
-                          <p className="text-sm text-slate-700 italic">
-                            {version.change_notes || "No notes provided."}
-                          </p>
-                        </div>
-                        <div>
-                          <h4 className="font-semibold text-slate-800 text-xs uppercase tracking-wider mb-1">
-                            Template Content
-                          </h4>
-                          <pre className="bg-slate-100 p-3 rounded-md text-xs font-mono whitespace-pre-wrap overflow-x-auto">
-                            {version.template_content}
-                          </pre>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {promptVersions.length === 0 && (
                     <p className="text-center text-slate-500">
                       No version history found.

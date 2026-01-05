@@ -25,7 +25,6 @@ To use the demo credentials, you need to create the following users in your Supa
 5. After creating, go to **SQL Editor** and run:
 
 ```sql
--- Create admin user profile
 INSERT INTO user_profiles (id, email, role, full_name, is_active)
 VALUES (
   (SELECT id FROM auth.users WHERE email = 'admin@demo.com'),

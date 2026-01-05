@@ -1,7 +1,7 @@
 export interface UserProfile {
   id: string;
   email: string;
-  role: 'admin' | 'client';
+  role: 'super_admin' | 'client_admin' | 'client_user' | undefined;
   client_id: string | null;
   full_name: string | null;
   is_active: boolean;

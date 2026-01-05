@@ -1,3 +1,13 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+@keyframes shrink-width {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
+.animate-shrink-width {
+  animation-name: shrink-width;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}

@@ -51,7 +51,7 @@ export default function Dashboard() {
   const loadDashboardStats = async () => {
     if (!user) return;
 
-    const clientFilter = user.role === 'admin' ? {} : { client_id: user.client_id };
+    const clientFilter = user.role === 'super_admin' ? {} : { client_id: user.client_id };
 
     const [jobsData, categoriesData, exportsData, projectsData] = await Promise.all([
       supabase.from('facet_generation_jobs').select('status').match(clientFilter),
@@ -83,8 +83,12 @@ export default function Dashboard() {
     { id: 'generate' as View, label: 'Generate Facets', icon: Settings },
   ];
 
-  if (user?.role === 'admin') {
-    menuItems.push({ id: 'clients' as View, label: 'Manage Clients', icon: Users });
+   if (user?.role === 'super_admin' || user?.role === 'client_admin') {
+    menuItems.push({ 
+      id: 'clients' as View, 
+      label: user.role === 'super_admin' ? 'Manage Clients' : 'Manage Team', 
+      icon: Users 
+    });
   }
 
   const renderContent = () => {
@@ -93,7 +97,7 @@ export default function Dashboard() {
         return (
           <div>
             <h2 className="text-2xl font-bold text-slate-900 mb-6">
-              {user?.role === 'admin' ? 'Admin Dashboard' : 'Dashboard'}
+              {user?.role === 'super_admin' ? 'Admin Dashboard' : 'Dashboard'}
             </h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
@@ -209,8 +213,10 @@ export default function Dashboard() {
         return <PromptManagement />;
       case 'generate':
         return <FacetGeneration onComplete={() => setCurrentView('dashboard')} />;
-      case 'clients':
-        return user?.role === 'admin' ? <ClientManagement /> : null;
+            case 'clients':
+        return (user?.role === 'super_admin' || user?.role === 'client_admin') 
+          ? <ClientManagement /> 
+          : null;
       default:
         return null;
     }
@@ -222,11 +228,16 @@ export default function Dashboard() {
         <div className="p-6 border-b border-slate-200">
           <h1 className="text-xl font-bold text-slate-900">Facet Builder Pro</h1>
           <p className="text-sm text-slate-600 mt-1">{user?.email}</p>
-          {user?.role === 'admin' && (
-            <span className="inline-block mt-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">
-              Admin
-            </span>
-          )}
+          {user?.role === 'super_admin' && (
+  <span className="inline-block mt-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs font-medium rounded">
+    Super Admin
+  </span>
+)}
+{user?.role === 'client_admin' && (
+  <span className="inline-block mt-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">
+    Client Admin
+  </span>
+)}
         </div>
 
         <nav className="p-4">
