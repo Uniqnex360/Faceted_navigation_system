@@ -1004,7 +1004,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
 
           {/* Multi-Level Cascading Dropdowns */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            {[1, 2, 3, 4, 5, 6].map((level) => {
+            {[1, 2, 3].map((level) => {
               const levelCats = getLevelCategories(level);
               const isDisabled = level > 1 && !levelSelections[level - 1];
 
@@ -1129,7 +1129,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
                   );
                 })
               ) : (
-                <div className="text-[10px] text-slate-400 italic py-2 text-center border border-dashed border-slate-200 rounded-md">
+                <div className="text-[12px] text-slate-400  py-2 text-center border border-dashed border-slate-200 rounded-md">
                   No categories added to the job yet.
                 </div>
               )}
