@@ -357,7 +357,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       if (duplicateJob) {
         const date = new Date(duplicateJob.created_at).toLocaleDateString();
         toast.confirm(
-          `Idenfical resuls found from ${date}.Load them to save credits?`,
+          `Idenfical results found from ${date}.Load them to save credits?`,
           () => {
             loadExistingResult(duplicateJob.id);
           },
