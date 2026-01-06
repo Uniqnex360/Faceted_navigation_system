@@ -137,7 +137,6 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
   };
 
   const handleAddToJob = () => {
-    // 1. Strict Requirement: Must have Level 1 and 2
     if (!levelSelections[1] || !levelSelections[2]) {
       toast.error("Please select at least Level 1 and Level 2!");
       return;
@@ -146,27 +145,21 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
     const selectedLevels = Object.values(levelSelections).filter(Boolean);
     const fullPath = selectedLevels.join(" > ");
 
-    // 2. Search for the category
-    // First try exact match (e.g. if the user actually picked all 3 levels)
     let targetCategory = categories.find(
       (c) => c.category_path.trim() === fullPath.trim()
     );
 
-    // 3. FALLBACK: If user only picked L1 > L2, find the first L3 that belongs to it
     if (!targetCategory) {
       targetCategory = categories.find((c) =>
         c.category_path.trim().startsWith(fullPath.trim())
       );
     }
 
-    // 4. Execution
     if (targetCategory) {
       toggleCategory(targetCategory.id);
-      // Logic check: if already in queue, we are removing it, else adding
       const isRemoving = selectedCategories.has(targetCategory.id);
       toast.success(isRemoving ? `Removed: ${fullPath}` : `Added: ${fullPath}`);
     } else {
-      // This only shows if the text typed doesn't exist in any category_path string
       toast.error("No matching data found for this selection.");
     }
   };
@@ -645,7 +638,6 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
 
     const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
 
-    // Updated CSV header with all 9 columns
     const csvRows = [
       "Input Taxonomy,End Category (C3),Filter Attributes,Possible Values,Filling Percentage (Approx.),Priority (High / Medium / Low),Confidence Score (1–10),# of available sources,List the sources URL",
       ...facetsToExport.map((f) => {
@@ -655,43 +647,36 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
         const categoryName =
           categoryMap.get(f.category_id) || "Unknown Category";
 
-        // Column A: Input Taxonomy
         const inputTaxonomy =
           f["Input Taxonomy"] || f["A. Input Taxonomy"] || categoryPath;
 
-        // Column B: End Category
         const endCategory =
           f["End Category (C3)"] || f["B. End Category (C3)"] || categoryName;
 
-        // Column C: Filter Attributes
         const filterAttributes =
           f.facet_name ||
           f["Filter Attributes"] ||
           f["C. Filter Attributes"] ||
           "";
 
-        // Column D: Possible Values
         const possibleValues =
           f.possible_values ||
           f["Possible Values"] ||
           f["D. Possible Values"] ||
           "";
 
-        // Column E: Filling Percentage
         const fillingPercentage =
           f.filling_percentage ||
           f["Filling Percentage (Approx.)"] ||
           f["E. Filling Percentage (Approx.)"] ||
           0;
 
-        // Column F: Priority
         const priority =
           f.priority ||
           f["Priority (High / Medium / Low)"] ||
           f["F. Priority (High / Medium / Low)"] ||
           "Medium";
 
-        // Column G: Confidence Score
         const confidenceScore =
           f.confidence_score ||
           f["Confidence Score (1–10)"] ||
@@ -1105,9 +1090,6 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
               {selectedCategories.size > 0 ? (
                 Array.from(selectedCategories).map((id) => {
                   const cat = categories.find((c) => c.id === id);
-                  // Determine what to show:
-                  // If the user selected a truncated path (L1 > L2), show that.
-                  // Otherwise show the full path.
                   return (
                     <div
                       key={id}
