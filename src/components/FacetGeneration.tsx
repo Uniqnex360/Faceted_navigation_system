@@ -1002,7 +1002,6 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
             </button>
           </div>
 
-          {/* Multi-Level Cascading Dropdowns */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             {[1, 2, 3].map((level) => {
               const levelCats = getLevelCategories(level);
