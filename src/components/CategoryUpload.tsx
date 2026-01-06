@@ -2,19 +2,33 @@ import { useState } from 'react';
 import { Upload, Download, FileText, CheckCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext.tsx';
 
 export default function CategoryUpload() {
   const { user } = useAuth();
+  const toast=useToast()
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<{ success: number; failed: number } | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
+      const selectedFile=e.target.files[0]
+      const validTypes=[
+        'text/csv',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+        'text/plain'
+      ]
+      if(!validTypes.includes(selectedFile.type) && !selectedFile.name.endsWith('.csv'))
+      {
+        toast.error("Please upload a valid CSV, Excel, or Text file.")
+        return
+      }
       setFile(e.target.files[0]);
       setUploadResult(null);
     }
   };
+  const processData=async(row)
 
   const parseCSV = (text: string): string[][] => {
     const lines = text.trim().split('\n');
@@ -80,8 +94,7 @@ export default function CategoryUpload() {
           name,
           metadata: {},
         };
-      }).filter(cat => cat.name); // Filter out any rows that result in an empty name
-      // --- END: NEW, ROBUST LOGIC ---
+      }).filter(cat => cat.name); 
 
       let success = 0;
       let failed = 0;

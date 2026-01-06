@@ -16,9 +16,9 @@ import { FacetGenerationJob } from "../types";
 export default function ProjectManagement() {
   const { user } = useAuth();
   const [projects, setProjects] = useState<FacetGenerationJob[]>([]);
+  const [categoryMap,setCategoryMap]=useState<Record<string,string>>({})
   const [projectName, setProjectName] = useState("");
-  const [selectedProject, setSelectedProject] =
-    useState<FacetGenerationJob | null>(null);
+  const [selectedProject, setSelectedProject] =useState<FacetGenerationJob | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [historicalFacets, setHistoricalFacets] = useState<RecommendedFacet[]>(
@@ -77,12 +77,22 @@ export default function ProjectManagement() {
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (user.role !== "admin") {
+    if (user.role !== "super_admin") {
       query.eq("client_id", user.client_id);
     }
 
-    const { data } = await query;
-    setProjects((data as FacetGenerationJob[]) || []);
+    const { data:jobs,error } = await query;
+    if(error)return
+    const allCategoryIds=Array.from(new Set((jobs||[]).flatMap((j)=>j.category_ids||[])))
+    if(allCategoryIds.length>0)
+    {
+      const {data:catData}=await supabase.from('categories').select('id,name').in('id',allCategoryIds)
+      const mapping:Record<string,string>={}
+     catData?.forEach((c) => (mapping[c.id] = c.name));
+     setCategoryMap(mapping);
+        
+    }
+    setProjects((jobs as FacetGenerationJob[]) || []);
   };
 
   const createProject = async () => {
@@ -163,7 +173,7 @@ export default function ProjectManagement() {
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
               <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                Project Name
+                Breadcrumbs
               </th>
               <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
                 Status
@@ -185,9 +195,23 @@ export default function ProjectManagement() {
           <tbody className="divide-y divide-slate-200">
             {projects.map((project) => (
               <tr key={project.id} className="hover:bg-slate-50">
-                <td className="px-6 py-4 text-sm font-medium text-slate-900">
-                  {project.project_name || "Untitled Project"}
-                </td>
+                
+        <div className="flex flex-wrap items-center gap-1 px-6 py-4">
+          {project.category_ids && project.category_ids.length>0 ? (
+            project.category_ids.map((id,index)=>(
+              <span key={id} className="flex items-center text-[11px] text-slate-500">
+                <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                  {categoryMap[id]||"Loading..."}
+                </span>
+                {index<project.category_ids.length-1 && (
+                  <span className="mx-1 text-slate-300">/</span>
+                )}
+              </span>
+            ))
+          ):(
+            <span className="text-xs text-slate-400 italic">No categories linked!</span>
+          )}
+        </div>
                 <td className="px-6 py-4">
                   <span
                     className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
