@@ -16,10 +16,10 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import ProjectManagement from '../components/ProjectManagement';
-import CategoryUpload from '../components/CategoryUpload';
 import PromptManagement from '../components/PromptManagement';
 import FacetGeneration from '../components/FacetGeneration';
 import ClientManagement from '../components/ClientManagement';
+import CategoryUpload from '../components/CategoryUpload.tsx';
 
 type View = 'dashboard' | 'projects' | 'upload' | 'prompts' | 'generate' | 'clients';
 
