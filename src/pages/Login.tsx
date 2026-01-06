@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { LogIn, Loader } from 'lucide-react';
+import { LogIn, Loader, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 
 export default function Login() {
-  const { signIn } = useAuth();
+  const { signIn, signOut } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -15,7 +16,27 @@ export default function Login() {
     setIsLoading(true);
 
     try {
+      // 1. First, perform the standard sign-in via AuthContext
       await signIn(email, password);
+
+      // 2. Immediately after successful auth, check the user's active status in user_profiles
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user) {
+        const { data: profile, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('is_active')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (profileError) throw new Error('Error verifying account status');
+
+        // 3. If the profile is found and marked as inactive (blocked), kick them out
+        if (profile && profile.is_active === false) {
+          await signOut(); // Clear the session immediately
+          throw new Error('Your account has been deactivated. Please contact your administrator.');
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sign in');
     } finally {
@@ -49,7 +70,7 @@ export default function Login() {
                 id="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                 placeholder="you@company.com"
                 required
               />
@@ -64,27 +85,28 @@ export default function Login() {
                 id="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                 placeholder="••••••••"
                 required
               />
             </div>
 
             {error && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-                {error}
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-start gap-3 animate-in fade-in slide-in-from-top-1">
+                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                <span>{error}</span>
               </div>
             )}
 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 px-6 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              className="w-full py-3 px-6 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-[0.98]"
             >
               {isLoading ? (
                 <>
                   <Loader className="w-5 h-5 animate-spin" />
-                  Signing In...
+                  Verifying...
                 </>
               ) : (
                 <>

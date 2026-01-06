@@ -8,6 +8,8 @@ import {
   Shield,
   Loader,
   Check,
+  ToggleRight,
+  ToggleLeft,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -33,13 +35,22 @@ export default function ClientManagement() {
   const [contactEmail, setContactEmail] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
   const [clientUsers, setClientUsers] = useState<Profile[]>([]);
-
+  const [editingClient, setSelectedEditingClient] = useState<Client | null>(
+    null
+  );
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
   // Forms
   const [newClientName, setNewClientName] = useState("");
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserRole, setNewUserRole] = useState("client_user");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [editingUser, setEditingUser] = useState<Profile | null>(null);
+  const [editUserFullName, setEditUserFullName] = useState("");
+  const [editUserRole, setEditUserRole] = useState<
+    "client_admin" | "client_user"
+  >("client_user");
 
   useEffect(() => {
     initComponent();
@@ -77,11 +88,115 @@ export default function ClientManagement() {
         .from("user_profiles") // Corrected to match your AuthContext table name
         .select("*")
         .eq("client_id", user.client_id);
-      
+
       setClientUsers((usersData as Profile[]) || []);
     }
   };
+  // --- EDIT CLIENT ---
+  const startEdit = (client: Client) => {
+    setSelectedEditingClient(client);
+    setEditName(client.name);
+    setEditEmail(client.contact_email || "");
+  };
 
+  const saveEdit = async () => {
+    if (!editingClient) return;
+    setIsSubmitting(true);
+    try {
+      const { error } = await supabase
+        .from("clients")
+        .update({ name: editName, contact_email: editEmail })
+        .eq("id", editingClient.id);
+
+      if (error) throw error;
+      toast.success("Company updated successfully");
+      setSelectedEditingClient(null);
+      loadClients();
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+  // --- EDIT USER ---
+  const startEditUser = (profile: Profile) => {
+    setEditingUser(profile);
+    setEditUserFullName(profile.full_name || "");
+    setEditUserRole(profile.role as "client_admin" | "client_user");
+  };
+
+  const saveUserEdit = async () => {
+    if (!editingUser) return;
+    setIsSubmitting(true);
+    try {
+      const { error } = await supabase
+        .from("user_profiles")
+        .update({ full_name: editUserFullName, role: editUserRole })
+        .eq("id", editingUser.id);
+
+      if (error) throw error;
+      toast.success("User updated successfully");
+
+      // Refresh local list
+      setClientUsers((prev) =>
+        prev.map((u) =>
+          u.id === editingUser.id
+            ? { ...u, full_name: editUserFullName, role: editUserRole }
+            : u
+        )
+      );
+      setEditingUser(null);
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // --- BLOCK / UNBLOCK USER ---
+  const toggleUserBlock = async (profile: Profile) => {
+    if (profile.id === user?.id) {
+      toast.error("You cannot block yourself.");
+      return;
+    }
+    const newStatus = !profile.is_active;
+    try {
+      const { error } = await supabase
+        .from("user_profiles")
+        .update({ is_active: newStatus })
+        .eq("id", profile.id);
+
+      if (error) throw error;
+      toast.success(`User ${newStatus ? "Unblocked" : "Blocked"}`);
+      setClientUsers((prev) =>
+        prev.map((u) =>
+          u.id === profile.id ? { ...u, is_active: newStatus } : u
+        )
+      );
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
+
+  // --- DELETE CLIENT ---
+  const handleDeleteClient = (client: Client) => {
+    toast.confirm(
+      `Delete ${client.name}? This will block access for all users under this company.`,
+      async () => {
+        const { error } = await supabase
+          .from("clients")
+          .delete()
+          .eq("id", client.id);
+
+        if (error) {
+          toast.error("Cannot delete client with existing records.");
+        } else {
+          toast.success("Company deleted successfully");
+          loadClients();
+        }
+      }
+    );
+  };
   // --- SUPER ADMIN OPERATIONS ---
   const loadClients = async () => {
     const { data, error } = await supabase
@@ -105,7 +220,8 @@ export default function ClientManagement() {
       });
 
       if (error) {
-        if (error.code === "23505") throw new Error("Client or email already exists.");
+        if (error.code === "23505")
+          throw new Error("Client or email already exists.");
         throw error;
       }
 
@@ -138,7 +254,7 @@ export default function ClientManagement() {
       () => executeDelete(targetUser), // onConfirm
       {
         confirmText: "Delete User",
-        cancelText: "Keep User"
+        cancelText: "Keep User",
       }
     );
   };
@@ -155,15 +271,15 @@ export default function ClientManagement() {
       if (error) throw error;
 
       toast.success(`${targetUser.email} has been removed.`);
-      
+
       // Refresh user list
-      const targetClientId = user?.role === "client_admin" ? user.client_id : selectedClient?.id;
+      const targetClientId =
+        user?.role === "client_admin" ? user.client_id : selectedClient?.id;
       const { data } = await supabase
         .from("user_profiles")
         .select("*")
         .eq("client_id", targetClientId);
       setClientUsers((data as Profile[]) || []);
-
     } catch (err: any) {
       toast.error(err.message);
     } finally {
@@ -182,12 +298,68 @@ export default function ClientManagement() {
     if (error) toast.error("Failed to load users");
     else setClientUsers((data as Profile[]) || []);
   };
+  // --- TOGGLE USER STATUS ---
+  const toggleUserActive = async (
+    targetUser: Profile,
+    currentStatus: boolean
+  ) => {
+    if (targetUser.id === user?.id) {
+      toast.error("You cannot deactivate your own account.");
+      return;
+    }
 
+    try {
+      const { error } = await supabase
+        .from("user_profiles")
+        .update({ is_active: !currentStatus })
+        .eq("id", targetUser.id);
+
+      if (error) throw error;
+
+      toast.success(`User ${!currentStatus ? "activated" : "deactivated"}`);
+
+      // Refresh the local list
+      setClientUsers((prev) =>
+        prev.map((u) =>
+          u.id === targetUser.id ? { ...u, is_active: !currentStatus } : u
+        )
+      );
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
+  // --- TOGGLE COMPANY STATUS ---
+  const toggleCompanyActive = async (client: Client) => {
+    const newStatus = !client.is_active;
+
+    try {
+      const { error } = await supabase
+        .from("clients")
+        .update({ is_active: newStatus })
+        .eq("id", client.id);
+
+      if (error) throw error;
+
+      toast.success(
+        `${client.name} is now ${newStatus ? "Active" : "Inactive"}`
+      );
+
+      // Update local state so the UI flips instantly
+      setClients((prev) =>
+        prev.map((c) =>
+          c.id === client.id ? { ...c, is_active: newStatus } : c
+        )
+      );
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
   // --- USER INVITATION ---
   const inviteUser = async () => {
-    const targetClientId = user?.role === "client_admin" ? user.client_id : selectedClient?.id;
+    const targetClientId =
+      user?.role === "client_admin" ? user.client_id : selectedClient?.id;
     if (!newUserEmail.trim() || !targetClientId) return;
-    
+
     setIsSubmitting(true);
     try {
       const response = await fetch(
@@ -226,7 +398,12 @@ export default function ClientManagement() {
     }
   };
 
-  if (isLoading) return <div className="p-8 text-center"><Loader className="animate-spin mx-auto" /></div>;
+  if (isLoading)
+    return (
+      <div className="p-8 text-center">
+        <Loader className="animate-spin mx-auto" />
+      </div>
+    );
 
   if (user?.role !== "super_admin" && user?.role !== "client_admin") {
     return <div className="p-8 text-center text-slate-500">Access Denied</div>;
@@ -236,7 +413,9 @@ export default function ClientManagement() {
   if (view === "list" && user.role === "super_admin") {
     return (
       <div>
-        <h2 className="text-2xl font-bold text-slate-900 mb-6">Client Management</h2>
+        <h2 className="text-2xl font-bold text-slate-900 mb-6">
+          Client Management
+        </h2>
         <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
           <h3 className="font-semibold text-slate-900 mb-4">Add New Client</h3>
           <div className="flex flex-col md:flex-row gap-4">
@@ -268,26 +447,127 @@ export default function ClientManagement() {
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 border-b border-slate-200 text-slate-900 font-semibold">
               <tr>
-                <th className="px-6 py-3">Company</th>
-                <th className="px-6 py-3">Status</th>
-                <th className="px-6 py-3">Actions</th>
+                <th className="px-6 py-3">Company Name</th>
+                <th className="px-6 py-3 text-left">Status</th>
+                <th className="px-6 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
               {clients.map((client) => (
-                <tr key={client.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4 font-medium">{client.name}</td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded-full text-xs ${client.is_active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                      {client.is_active ? "Active" : "Inactive"}
-                    </span>
+                <tr
+                  key={client.id}
+                  className="hover:bg-slate-50 transition-colors"
+                >
+                  {/* COLUMN 1: NAME */}
+                  <td className="px-6 py-4 font-medium">
+                    {editingClient?.id === client.id ? (
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-blue-500 uppercase">
+                          Company Name
+                        </label>
+                        <input
+                          className="border border-blue-200 rounded px-3 py-2 text-sm w-full outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50/30"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          autoFocus
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-slate-900">{client.name}</span>
+                    )}
                   </td>
+
+                  {/* COLUMN 2: STATUS OR EMAIL (Toggle hidden during edit) */}
                   <td className="px-6 py-4">
-                    <button onClick={() => manageClientUsers(client)} className="text-blue-600 hover:text-blue-800 flex items-center gap-1">
-                      <Users className="w-4 h-4" /> Manage
-                    </button>
+                    {editingClient?.id === client.id ? (
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-blue-500 uppercase">
+                          Contact Email
+                        </label>
+                        <input
+                          className="border border-blue-200 rounded px-3 py-2 text-sm w-full outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50/30"
+                          value={editEmail}
+                          onChange={(e) => setEditEmail(e.target.value)}
+                          placeholder="email@company.com"
+                        />
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => toggleCompanyActive(client)}
+                        className="flex items-center gap-2 group transition-opacity hover:opacity-80"
+                        title={
+                          client.is_active
+                            ? "Deactivate Company"
+                            : "Activate Company"
+                        }
+                      >
+                        {client.is_active ? (
+                          <>
+                            <ToggleRight className="w-7 h-7 text-green-500" />
+                            <span className="text-xs font-bold text-green-600 uppercase tracking-tight">
+                              Active
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <ToggleLeft className="w-7 h-7 text-slate-300" />
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-tight">
+                              Inactive
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    )}
                   </td>
-                  
+
+                  {/* COLUMN 3: ACTIONS */}
+                  <td className="px-6 py-4 text-right">
+                    <div className="flex justify-end items-center gap-3">
+                      {editingClient?.id === client.id ? (
+                         <div className="flex gap-2">
+    <button
+      onClick={saveEdit}
+      // DISABLED IF: Name AND Email are exactly the same as the original client record
+      disabled={isSubmitting || (editName === client.name && editEmail === (client.contact_email || ""))}
+      className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed transition-all"
+    >
+      {isSubmitting ? "Saving..." : "Save Changes"}
+    </button>
+    <button
+      onClick={() => setSelectedEditingClient(null)}
+      className="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-xs font-bold hover:bg-slate-200"
+    >
+      Cancel
+    </button>
+  </div>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => manageClientUsers(client)}
+                            className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-sm font-semibold"
+                          >
+                            <Users className="w-4 h-4" /> Manage Users
+                          </button>
+
+                          <div className="h-4 w-[1px] bg-slate-200 mx-1"></div>
+
+                          <button
+                            onClick={() => startEdit(client)}
+                            className="text-slate-500 hover:text-slate-700 text-sm font-medium"
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            onClick={() => handleDeleteClient(client)}
+                            className="text-red-400 hover:text-red-600 transition-colors p-1"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -301,14 +581,19 @@ export default function ClientManagement() {
   return (
     <div>
       {user.role === "super_admin" && (
-        <button onClick={() => setView("list")} className="flex items-center gap-2 text-slate-500 hover:text-slate-800 mb-6">
+        <button
+          onClick={() => setView("list")}
+          className="flex items-center gap-2 text-slate-500 hover:text-slate-800 mb-6"
+        >
           <ArrowLeft className="w-4 h-4" /> Back to Clients
         </button>
       )}
 
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">{selectedClient?.name || "Loading..."}</h2>
+          <h2 className="text-2xl font-bold text-slate-900">
+            {selectedClient?.name || "Loading..."}
+          </h2>
           <p className="text-slate-500">User Management</p>
         </div>
       </div>
@@ -331,7 +616,9 @@ export default function ClientManagement() {
             className="px-4 py-2 border border-slate-300 rounded-lg bg-white"
           >
             <option value="client_user">Regular User</option>
-            {user.role === "super_admin" && <option value="client_admin">Client Admin</option>}
+            {user.role === "super_admin" && (
+              <option value="client_admin">Client Admin</option>
+            )}
           </select>
           <button
             onClick={inviteUser}
@@ -349,52 +636,121 @@ export default function ClientManagement() {
             <tr>
               <th className="px-6 py-3">User</th>
               <th className="px-6 py-3">Role</th>
+              <th className="px-6 py-3">Status</th>
               <th className="px-6 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
-            {clientUsers.map((profile) => (
-              <tr key={profile.id} className="hover:bg-slate-50">
-                <td className="px-6 py-4">
-                  <div className="font-medium">{profile.email}</div>
-                  <div className="text-xs text-slate-500">{profile.full_name || "Invited"}</div>
-                </td>
-                <td className="px-6 py-4">
-                  <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${profile.role === "client_admin" ? "bg-purple-100 text-purple-700" : "bg-slate-100 text-slate-700"}`}>
-                    {profile.role === "client_admin" && <Shield className="w-3 h-3" />}
-                    {profile.role === "client_admin" ? "Admin" : "User"}
-                  </span>
-                </td>
-                 <td className="px-6 py-4">
-        {profile.last_sign_in_at ? (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
-            <Check className="w-3 h-3" /> Active
-          </span>
+  {clientUsers.map((profile) => (
+    <tr key={profile.id} className="hover:bg-slate-50 transition-colors">
+      {/* COLUMN 1: USER INFO */}
+      <td className="px-6 py-4">
+        {editingUser?.id === profile.id ? (
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-bold text-blue-500 uppercase">Full Name</label>
+            <input 
+              className="border border-blue-200 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              value={editUserFullName}
+              onChange={(e) => setEditUserFullName(e.target.value)}
+            />
+            <span className="text-[10px] text-slate-400">{profile.email}</span>
+          </div>
         ) : (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-            Pending Setup
+          <>
+            <div className="font-medium text-slate-900">{profile.email}</div>
+            <div className="text-xs text-slate-500">{profile.full_name || "Invited"}</div>
+          </>
+        )}
+      </td>
+
+      {/* COLUMN 2: ROLE */}
+      <td className="px-6 py-4">
+        {editingUser?.id === profile.id ? (
+          <select 
+            className="border border-blue-200 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            value={editUserRole}
+            onChange={(e) => setEditUserRole(e.target.value as any)}
+          >
+            <option value="client_user">User</option>
+            <option value="client_admin">Admin</option>
+          </select>
+        ) : (
+          <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${profile.role === "client_admin" ? "bg-purple-100 text-purple-700" : "bg-slate-100 text-slate-700"}`}>
+            {profile.role === "client_admin" && <Shield className="w-3 h-3" />}
+            {profile.role === "client_admin" ? "Admin" : "User"}
           </span>
         )}
       </td>
-      <td className="px-6 py-4 text-right">
-        <button
-          onClick={() => handleDeleteClick(profile)}
-          // Disable button UI if delete is fundamentally impossible
-          disabled={profile.id === user?.id || (user?.role === 'client_admin' && profile.role !== 'client_user')}
-          className={`p-1 rounded-md transition-colors ${
-            profile.id === user?.id || (user?.role === 'client_admin' && profile.role !== 'client_user')
-              ? 'text-slate-300 cursor-not-allowed'
-              : 'text-red-600 hover:bg-red-50'
-          }`}
-          title={profile.id === user?.id ? "You cannot delete yourself" : "Delete User"}
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
+
+      {/* COLUMN 3: STATUS (BLOCK/UNBLOCK) */}
+      <td className="px-6 py-4">
+        {editingUser?.id === profile.id ? (
+           <span className="text-xs text-slate-400 italic">Save to see status</span>
+        ) : (
+          <button 
+            onClick={() => toggleUserBlock(profile)}
+            className="flex items-center gap-2 group"
+            disabled={profile.id === user?.id}
+          >
+            {profile.is_active ? (
+              <>
+                <ToggleRight className="w-7 h-7 text-green-500 group-hover:text-green-600" />
+                <span className="text-xs font-bold text-green-600 uppercase">Active</span>
+              </>
+            ) : (
+              <>
+                <ToggleLeft className="w-7 h-7 text-red-400 group-hover:text-red-500" />
+                <span className="text-xs font-bold text-red-500 uppercase">Blocked</span>
+              </>
+            )}
+          </button>
+        )}
       </td>
-                
-              </tr>
-            ))}
-          </tbody>
+
+      {/* COLUMN 4: ACTIONS */}
+      <td className="px-6 py-4 text-right">
+        <div className="flex justify-end gap-2">
+          {editingUser?.id === profile.id ? (
+            <div className="flex gap-2">
+    <button
+      onClick={saveUserEdit}
+      // DISABLED IF: Full Name AND Role are exactly the same as the original profile record
+      disabled={isSubmitting || (editUserFullName === (profile.full_name || "") && editUserRole === profile.role)}
+      className="text-blue-600 disabled:text-slate-300 disabled:cursor-not-allowed hover:underline text-xs font-bold"
+    >
+      {isSubmitting ? "..." : "Save"}
+    </button>
+    <button
+      onClick={() => setEditingUser(null)}
+      className="text-slate-400 hover:underline text-xs"
+    >
+      Cancel
+    </button>
+  </div>
+
+          ) : (
+            <>
+              <button 
+                onClick={() => startEditUser(profile)} 
+                className="text-slate-500 hover:text-slate-700 p-1"
+                disabled={user?.role === 'client_admin' && profile.role === 'client_admin' && profile.id !== user.id}
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => handleDeleteClick(profile)}
+                disabled={profile.id === user?.id || (user?.role === 'client_admin' && profile.role !== 'client_user')}
+                className={`p-1 rounded-md ${profile.id === user?.id ? 'text-slate-200' : 'text-red-400 hover:text-red-600'}`}
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </>
+          )}
+        </div>
+      </td>
+    </tr>
+  ))}
+</tbody>
         </table>
       </div>
     </div>

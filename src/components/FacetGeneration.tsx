@@ -331,6 +331,18 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
         .eq("job_id", existingJobId)
         .order("sort_order");
       const fetchedFacets = (facets as RecommendedFacet[]) || [];
+      //   if(fetchedFacets.length===0)
+      //   {
+      //     setIsGenerating(false)
+      //      const emptyError = "AI returned 0 facets. This can happen due to high traffic or malformed category data. Please try again.";
+      //      setError(emptyError)
+      //      toast.error("Generation Failed: No facets produced.");
+      //        await supabase
+      // .from("facet_generation_jobs")
+      // .update({ status: "failed" })
+      // .eq("id", job.id);
+      // return
+      //   }
       setGeneratedFacets(fetchedFacets);
       setJobId(existingJobId);
       const grouped = fetchedFacets.reduce((acc, facet) => {
@@ -560,7 +572,21 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       }
       const responseData = await response.json();
       console.log("🎯 API RESPONSE:", responseData);
+      if (responseData.facets_generated === 0) {
+        setIsGenerating(false);
+        const emptyError =
+          "The AI was unable to generate any facets for this selection. Please try again later!";
+        setError(emptyError);
+        toast.error("Generation Failed: 0 facets produced.");
 
+        // Mark job as failed in DB
+        await supabase
+          .from("facet_generation_jobs")
+          .update({ status: "failed" })
+          .eq("id", job.id);
+
+        return; // Stop execution
+      }
       const { data: facets } = await supabase
         .from("recommended_facets")
         .select("*")
@@ -1202,11 +1228,19 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       </div>
       {error && (
         <div
-          className="text-center bg-red-50 border border-red-200 text-sm text-red-700 px-4 py-3 rounded-lg mb-4 max-w-4xl mx-auto"
+          className="relative text-center bg-red-50 border border-red-200 text-sm text-red-700 px-10 py-3 rounded-lg mb-4 max-w-4xl mx-auto animate-in fade-in zoom-in duration-300"
           role="alert"
         >
           <strong className="font-bold">An error occurred: </strong>
           <span>{error}</span>
+
+          <button
+            onClick={() => setError(null)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-red-100 rounded-full transition-colors"
+            title="Dismiss"
+          >
+            <X className="w-4 h-4 text-red-400" />
+          </button>
         </div>
       )}
       <div className="flex justify-center">
