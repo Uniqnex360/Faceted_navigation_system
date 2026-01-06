@@ -64,7 +64,7 @@ export default function CategoryUpload() {
       if (error) throw error;
 
       toast.success(`Successfully saved ${categories.length} categories!`);
-      setManualRows([{ industry: '', path: '' }]); // Reset form
+      setManualRows([{ industry: '', path: '' }]); 
     } catch (err: any) {
       toast.error(err.message);
     } finally {
@@ -72,7 +72,6 @@ export default function CategoryUpload() {
     }
   };
 
-  // --- FILE UPLOAD FUNCTIONS ---
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
