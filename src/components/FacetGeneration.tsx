@@ -1034,7 +1034,6 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
             })}
           </div>
 
-          {/* Active Selection Area */}
           {Object.values(levelSelections).some((v) => v !== "") && (
             <div className="mt-2 p-4 bg-blue-50 rounded-xl border border-blue-100 animate-in fade-in slide-in-from-top-2">
               <div className="flex items-center justify-between gap-4">
