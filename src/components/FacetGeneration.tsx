@@ -751,7 +751,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
 
     await supabase.from("export_history").insert({
       job_id: jobId,
-      client_id:user?.client_id,
+      client_id: user?.client_id,
       category_ids: Array.from(selectedCategories),
       format: "csv",
       exported_by: user?.id,
@@ -1086,24 +1086,54 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
             </div>
           )}
 
-          {/* Persistent Selection Footer */}
-          <div className="mt-auto pt-4 border-t border-slate-100 flex justify-between items-center">
-            <div className="flex flex-col">
-              <span className="text-xs font-bold text-slate-700">
-                {selectedCategories.size} Categories Selected
-              </span>
-              <span className="text-[10px] text-slate-400">
-                Total in processing queue
-              </span>
+          <div className="mt-auto pt-4 border-t border-slate-100 flex flex-col gap-3">
+            <div className="flex justify-between items-center">
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-slate-700 uppercase tracking-tighter">
+                  Processing Queue ({selectedCategories.size})
+                </span>
+              </div>
+              {selectedCategories.size > 0 && (
+                <button
+                  onClick={() => setSelectedCategories(new Set())}
+                  className="text-[10px] text-red-500 font-bold hover:underline uppercase"
+                >
+                  Clear Queue
+                </button>
+              )}
             </div>
-            {selectedCategories.size > 0 && (
-              <button
-                onClick={() => setSelectedCategories(new Set())}
-                className="text-[10px] text-red-500 font-bold hover:underline uppercase"
-              >
-                Clear Queue
-              </button>
-            )}
+
+            <div className="max-h-[120px] overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+              {selectedCategories.size > 0 ? (
+                Array.from(selectedCategories).map((id) => {
+                  const cat = categories.find((c) => c.id === id);
+                  // Determine what to show:
+                  // If the user selected a truncated path (L1 > L2), show that.
+                  // Otherwise show the full path.
+                  return (
+                    <div
+                      key={id}
+                      className="flex items-center justify-between bg-slate-50 border border-slate-200 px-2 py-1.5 rounded-md group hover:border-blue-300 transition-colors"
+                    >
+                      <span className="text-[13px] text-slate-600 truncate flex-1 pr-2 font-medium">
+                        {cat?.category_path || "Unknown Category"}
+                      </span>
+                      <button
+                        onClick={() => toggleCategory(id)}
+                        className="text-slate-400 hover:text-red-500 transition-colors"
+                        title="Remove from queue"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-[10px] text-slate-400 italic py-2 text-center border border-dashed border-slate-200 rounded-md">
+                  No categories added to the job yet.
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
