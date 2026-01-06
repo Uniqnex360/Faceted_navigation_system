@@ -13,14 +13,14 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { Category, PromptTemplate, RecommendedFacet } from "../types";
 import { PROMPT_EXECUTION_ORDER } from "../utils/PromptOrder";
-import { useToast } from '../contexts/ToastContext';
+import { useToast } from "../contexts/ToastContext";
 
 interface FacetGenerationProps {
   onComplete: () => void;
 }
 
 export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
-  const toast=useToast()
+  const toast = useToast();
   const { user } = useAuth();
   const [columnMapping, setColumnMapping] = useState({
     input_taxonomy: "A. Input Taxonomy",
@@ -46,6 +46,9 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
   const [categorySearch, setCategorySearch] = useState("");
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [isCategoryListExpanded, setIsCategoryListExpanded] = useState(true);
+  const [levelSelections, setLevelSelections] = useState<{
+    [key: number]: string;
+  }>({ 1: "", 2: "", 3: "", 4: "", 5: "", 6: "" });
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedFacets, setGeneratedFacets] = useState<RecommendedFacet[]>(
@@ -74,8 +77,6 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       );
       return countries.length > 1 ? countries : [];
     }
-    // --- THE FIX ---
-    // If no dynamic countries are configured, return an EMPTY array.
     return [];
   }, [prompts]);
   useEffect(() => {
@@ -97,7 +98,85 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       return newSelections;
     });
   };
+  const getLevelCategories = (level: number) => {
+    if (level === 1) {
+      const uniqueL1 = Array.from(
+        new Set(
+          categories.map((c) => {
+            return c.category_path.split(">")[0].trim();
+          })
+        )
+      );
+      return uniqueL1.sort().map((name) => ({ id: name, name }));
+    }
 
+    const parentPathParts = [];
+    for (let i = 1; i < level; i++) {
+      if (levelSelections[i]) parentPathParts.push(levelSelections[i]);
+      else return [];
+    }
+
+    const parentPathString = parentPathParts.join(" > ");
+
+    const children = categories.filter(
+      (c) =>
+        c.category_path.startsWith(parentPathString + " >") ||
+        c.category_path === parentPathString
+    );
+
+    const uniqueNames = Array.from(
+      new Set(
+        children.map((c) => {
+          const parts = c.category_path.split(">");
+          return parts[level - 1]?.trim();
+        })
+      )
+    ).filter(Boolean);
+
+    return uniqueNames.sort().map((name) => ({ id: name, name }));
+  };
+
+  const handleAddToJob = () => {
+    // 1. Strict Requirement: Must have Level 1 and 2
+    if (!levelSelections[1] || !levelSelections[2]) {
+      toast.error("Please select at least Level 1 and Level 2!");
+      return;
+    }
+
+    const selectedLevels = Object.values(levelSelections).filter(Boolean);
+    const fullPath = selectedLevels.join(" > ");
+
+    // 2. Search for the category
+    // First try exact match (e.g. if the user actually picked all 3 levels)
+    let targetCategory = categories.find(
+      (c) => c.category_path.trim() === fullPath.trim()
+    );
+
+    // 3. FALLBACK: If user only picked L1 > L2, find the first L3 that belongs to it
+    if (!targetCategory) {
+      targetCategory = categories.find((c) =>
+        c.category_path.trim().startsWith(fullPath.trim())
+      );
+    }
+
+    // 4. Execution
+    if (targetCategory) {
+      toggleCategory(targetCategory.id);
+      // Logic check: if already in queue, we are removing it, else adding
+      const isRemoving = selectedCategories.has(targetCategory.id);
+      toast.success(isRemoving ? `Removed: ${fullPath}` : `Added: ${fullPath}`);
+    } else {
+      // This only shows if the text typed doesn't exist in any category_path string
+      toast.error("No matching data found for this selection.");
+    }
+  };
+  const handleLevelChange = (level: number, id: string) => {
+    const newSelections = { ...levelSelections, [level]: id };
+    for (let i = level + 1; i <= 6; i++) {
+      newSelections[i] = "";
+    }
+    setLevelSelections(newSelections);
+  };
   const filteredCategories = categories.filter((c) => {
     const matchSearches =
       c.name.toLowerCase().includes(categorySearch.toLowerCase()) ||
@@ -109,7 +188,6 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
     }
     return matchSearches;
   });
-
 
   const toggleSelectAllForCategory = (
     categoryId: string,
@@ -137,7 +215,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
     if (!user) return;
 
     const clientFilter =
-      user.role === "admin" ? {} : { client_id: user.client_id };
+      user.role === "super_admin" ? {} : { client_id: user.client_id };
 
     const [categoriesData, promptsData] = await Promise.all([
       supabase
@@ -229,29 +307,38 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
     }
   };
 
-  const checkForDuplicateJob=async()=>{
-    if(!user)return null
-    const currentCategoryIds=Array.from(selectedCategories).sort().join(',')
-    const currentPromptIds=Array.from(selectedPrompts).sort().join(',')
-    const {data:recentJobs}=await supabase.from('facet_generation_jobs').select("*").eq('client_id',user.client_id).eq('status',"completed").order('created_at',{ascending:false}).limit(20)
-    if(!recentJobs)return null 
-    const duplicateJob=recentJobs.find(job=>{
-      const jobCatIds=(job.category_ids||[]).sort().join(',')
-      const jobPromptIds=(job.selected_prompts||[]).sort().join(',')
-      return jobCatIds===currentCategoryIds && jobPromptIds===currentPromptIds
-    })
-    return duplicateJob
-  }
-  const loadExistingResult=async(existingJobId:string)=>{
-    setIsGenerating(true)
-    try {
-      toast.info("Loading existing results.....")
-      const {data:facets}=await supabase.from('recommended_facets')
+  const checkForDuplicateJob = async () => {
+    if (!user) return null;
+    const currentCategoryIds = Array.from(selectedCategories).sort().join(",");
+    const currentPromptIds = Array.from(selectedPrompts).sort().join(",");
+    const { data: recentJobs } = await supabase
+      .from("facet_generation_jobs")
       .select("*")
-      .eq('job_id',existingJobId)
-      .order('sort_order')
-      const fetchedFacets=(facets as RecommendedFacet[])||[]
-      setGeneratedFacets(fetchedFacets)
+      .eq("client_id", user.client_id)
+      .eq("status", "completed")
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (!recentJobs) return null;
+    const duplicateJob = recentJobs.find((job) => {
+      const jobCatIds = (job.category_ids || []).sort().join(",");
+      const jobPromptIds = (job.selected_prompts || []).sort().join(",");
+      return (
+        jobCatIds === currentCategoryIds && jobPromptIds === currentPromptIds
+      );
+    });
+    return duplicateJob;
+  };
+  const loadExistingResult = async (existingJobId: string) => {
+    setIsGenerating(true);
+    try {
+      toast.info("Loading existing results.....");
+      const { data: facets } = await supabase
+        .from("recommended_facets")
+        .select("*")
+        .eq("job_id", existingJobId)
+        .order("sort_order");
+      const fetchedFacets = (facets as RecommendedFacet[]) || [];
+      setGeneratedFacets(fetchedFacets);
       setJobId(existingJobId);
       const grouped = fetchedFacets.reduce((acc, facet) => {
         const categoryId = facet.category_id;
@@ -259,44 +346,37 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
         acc[categoryId].push(facet);
         return acc;
       }, {} as { [categoryId: string]: RecommendedFacet[] });
-      setGroupedFacets(grouped)
+      setGroupedFacets(grouped);
       toast.success("Loaded existing results successfully!");
-    } catch (error:any) {
+    } catch (error: any) {
       console.error("Error loading existing:", error);
       toast.error("Failed to load existing results.");
-
-      
+    } finally {
+      setIsGenerating(false);
     }
-    finally
-    {
-      setIsGenerating(false)
-    }
-  }
+  };
 
-  const generateFacets = async (forceNew=false) => {
+  const generateFacets = async (forceNew = false) => {
     if (selectedCategories.size === 0) return;
-    
-    if(!forceNew)
-    {
-      const duplicateJob=await checkForDuplicateJob()
-      if(duplicateJob)
-      {
+
+    if (!forceNew) {
+      const duplicateJob = await checkForDuplicateJob();
+      if (duplicateJob) {
         const date = new Date(duplicateJob.created_at).toLocaleDateString();
         toast.confirm(
           `Idenfical resuls found from ${date}.Load them to save credits?`,
-          ()=>{
-            loadExistingResult(duplicateJob.id)
-
+          () => {
+            loadExistingResult(duplicateJob.id);
           },
           {
-            confirmText:"Load Existing (Free)",
-            cancelText:"Generate New (Cost)",
-            onCancel:()=>{
-              generateFacets(true)
-            }
+            confirmText: "Load Existing (Free)",
+            cancelText: "Generate New (Cost)",
+            onCancel: () => {
+              generateFacets(true);
+            },
           }
-        )
-        return
+        );
+        return;
       }
     }
     if (!user) {
@@ -308,11 +388,11 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       setError(
         "Your user profile is not associated with a client. Cannot create job."
       );
-      setIsGenerating(false); // Make sure the spinner stops if it started
-      return; // Stop the function here.
+      setIsGenerating(false);
+      return;
     }
     if (selectedCategories.size === 0) {
-      return; // This check is also good to have
+      return;
     }
 
     setIsGenerating(true);
@@ -346,30 +426,23 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       //   const finalIndexB = indexB === -1 ? Infinity : indexB;
       //   return finalIndexA - finalIndexB;
       // });
-       const selectedPromptObjects = prompts.filter((p) =>
+      const selectedPromptObjects = prompts.filter((p) =>
         selectedPrompts.has(p.id)
       );
 
-      // --- FIX: EXPLICITLY HANDLE DEPENDENCIES ---
       selectedPromptObjects.sort((a, b) => {
         const nameA = a.name.trim();
         const nameB = b.name.trim();
 
-        // 1. CRITICAL: Industry Analysis MUST be First
-        // It generates the {{Level_X_Meta_JSON}} data needed by others.
         if (nameA === "Industry Analysis") return -1;
         if (nameB === "Industry Analysis") return 1;
 
-        // 2. CRITICAL: Master Prompt MUST be Last (or after Analysis)
-        // It consumes the JSON data. If it runs first, it sees empty data and outputs 0 facets.
         if (nameA === "Master Prompt") return 1;
         if (nameB === "Master Prompt") return -1;
 
-        // 3. Fallback to your custom execution order for everything else
         const indexA = PROMPT_EXECUTION_ORDER.indexOf(nameA);
         const indexB = PROMPT_EXECUTION_ORDER.indexOf(nameB);
-        
-        // Items not in the list go to the end (but before Master Prompt due to rule #2)
+
         const finalIndexA = indexA === -1 ? 999 : indexA;
         const finalIndexB = indexB === -1 ? 999 : indexB;
 
@@ -380,7 +453,26 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
           if (!prompt) {
             return null;
           }
+          const activeLevels = Object.values(levelSelections).filter(Boolean);
+          const selectionDepth = activeLevels.length;
+          const categoriesForAI = Array.from(selectedCategories)
+            .map((id) => {
+              const cat = categories.find((c) => c.id === id);
+              if (!cat) return null;
 
+              const pathParts = cat.category_path.split(" > ");
+              const cleanedPath = pathParts
+                .slice(0, selectionDepth)
+                .join(" > ");
+
+              return {
+                ...cat,
+                category_path: cleanedPath,
+                level: selectionDepth,
+                name: pathParts[selectionDepth - 1],
+              };
+            })
+            .filter(Boolean);
           let assembledContent: string | object | string[];
 
           if (prompt.name === "Industry Analysis") {
@@ -420,7 +512,6 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
             //   }
             // }
           } else {
-            // This is the fallback for all other standard prompts
             assembledContent = prompt.template;
           }
 
@@ -429,6 +520,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
             name: prompt.name,
             content: assembledContent,
             metadata: prompt.metadata,
+            context_categories: categoriesForAI,
           };
         })
         .filter((p) => p !== null);
@@ -537,8 +629,6 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
     }
   };
 
-  // Replace the existing exportFacets function with this new version
-
   const exportFacets = async () => {
     const allSelectedIds = new Set(
       Object.values(selectedFacetsForExport).flatMap((set) => Array.from(set))
@@ -608,21 +698,18 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
           f["G. Confidence Score (1–10)"] ||
           5;
 
-        // Column H: # of available sources
         const numSources =
           f.num_sources ||
           f["# of available sources"] ||
           f["H. # of available sources"] ||
           0;
 
-        // Column I: List the sources URL
         const sourceUrls =
           f.source_urls ||
           f["List the sources URL"] ||
           f["I. List the sources URL"] ||
           "N/A";
 
-        // Properly escape values for CSV
         const safeInputTaxonomy = `"${String(inputTaxonomy).replace(
           /"/g,
           '""'
@@ -664,6 +751,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
 
     await supabase.from("export_history").insert({
       job_id: jobId,
+      client_id:user?.client_id,
       category_ids: Array.from(selectedCategories),
       format: "csv",
       exported_by: user?.id,
@@ -899,118 +987,122 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       </div> */}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden flex flex-col h-[500px]">
-          {/* Header Area */}
-          <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-slate-900">
-                  Select Categories
-                </h3>
-                <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-medium">
-                  {selectedCategories.size} Selected
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowSelectedOnly(!showSelectedOnly)}
-                  className={`text-xs flex items-center gap-1 px-2 py-1 rounded border transition-colors ${
-                    showSelectedOnly
-                      ? "bg-blue-50 border-blue-200 text-blue-700"
-                      : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50"
-                  }`}
-                >
-                  <Filter className="w-3 h-3" />
-                  {showSelectedOnly ? "Show All" : "Review Selected"}
-                </button>
-                <button
-                  onClick={selectAllCategories}
-                  className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                >
-                  {selectedCategories.size === categories.length
-                    ? "Deselect All"
-                    : "Select All"}
-                </button>
-              </div>
-            </div>
-
-            {/* Search Bar */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search categories..."
-                value={categorySearch}
-                onChange={(e) => setCategorySearch(e.target.value)}
-                className="w-full pl-9 pr-8 py-2 text-sm border border-slate-300 rounded-md focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-              />
-              {categorySearch && (
-                <button
-                  onClick={() => setCategorySearch("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              )}
-            </div>
+        <div className="bg-white rounded-lg border border-slate-200 p-6 flex flex-col h-[500px]">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="font-bold text-slate-900 flex items-center gap-2">
+              <Filter className="w-4 h-4 text-blue-600" /> Category Schema
+            </h3>
+            <button
+              onClick={() =>
+                setLevelSelections({ 1: "", 2: "", 3: "", 4: "", 5: "", 6: "" })
+              }
+              className="text-xs text-blue-600 hover:underline font-semibold"
+            >
+              Reset Filters
+            </button>
           </div>
 
-          {/* Scrollable List */}
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            {filteredCategories.length > 0 ? (
-              filteredCategories.map((category) => (
-                <button
-                  key={category.id}
-                  onClick={() => toggleCategory(category.id)}
-                  className={`
-                    w-full flex items-start gap-3 p-3 rounded-lg transition-all text-left group
-                    ${
-                      selectedCategories.has(category.id)
-                        ? "bg-blue-50 border border-blue-100"
-                        : "hover:bg-slate-50 border border-transparent"
-                    }
-                  `}
-                >
-                  <div className="mt-0.5">
-                    {selectedCategories.has(category.id) ? (
-                      <CheckSquare className="w-5 h-5 text-blue-600 flex-shrink-0" />
-                    ) : (
-                      <Square className="w-5 h-5 text-slate-300 group-hover:text-slate-400 flex-shrink-0" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p
-                      className={`text-sm font-medium truncate ${
-                        selectedCategories.has(category.id)
-                          ? "text-blue-900"
-                          : "text-slate-900"
-                      }`}
-                    >
-                      {category.name}
-                    </p>
-                    <p
-                      className="text-xs text-slate-500 truncate"
-                      title={category.category_path}
-                    >
-                      {category.category_path}
-                    </p>
-                  </div>
-                </button>
-              ))
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-slate-500">
-                <Search className="w-8 h-8 mb-2 opacity-20" />
-                <p className="text-sm">No categories found.</p>
-                {showSelectedOnly && (
-                  <button
-                    onClick={() => setShowSelectedOnly(false)}
-                    className="mt-2 text-xs text-blue-600 hover:underline"
+          {/* Multi-Level Cascading Dropdowns */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            {[1, 2, 3, 4, 5, 6].map((level) => {
+              const levelCats = getLevelCategories(level);
+              const isDisabled = level > 1 && !levelSelections[level - 1];
+
+              return (
+                <div key={level} className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Level {level}
+                  </label>
+                  <select
+                    disabled={isDisabled}
+                    value={levelSelections[level]}
+                    onChange={(e) => handleLevelChange(level, e.target.value)}
+                    className={`w-full p-2 text-sm border rounded-lg outline-none transition-all ${
+                      isDisabled
+                        ? "bg-slate-50 border-slate-100 text-slate-300"
+                        : "bg-white border-slate-200 focus:ring-2 focus:ring-blue-500"
+                    }`}
                   >
-                    View all categories
-                  </button>
-                )}
+                    <option value="">Select Category</option>
+                    {levelCats.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Active Selection Area */}
+          {Object.values(levelSelections).some((v) => v !== "") && (
+            <div className="mt-2 p-4 bg-blue-50 rounded-xl border border-blue-100 animate-in fade-in slide-in-from-top-2">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold text-blue-400 uppercase">
+                    Current Selection
+                  </p>
+                  <p className="text-sm font-medium text-blue-900 truncate">
+                    {(() => {
+                      const ids =
+                        Object.values(levelSelections).filter(Boolean);
+                      const lastId = ids[ids.length - 1];
+                      return categories.find((c) => c.id === lastId)
+                        ?.category_path;
+                    })()}
+                  </p>
+                </div>
+                <button
+                  onClick={handleAddToJob}
+                  disabled={!levelSelections[1] || !levelSelections[2]}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+                    (() => {
+                      const fullPath = Object.values(levelSelections)
+                        .filter(Boolean)
+                        .join(" > ");
+                      const cat = categories.find((c) =>
+                        c.category_path.startsWith(fullPath)
+                      );
+                      return cat && selectedCategories.has(cat.id);
+                    })()
+                      ? "bg-red-100 text-red-600 hover:bg-red-200"
+                      : "bg-blue-600 text-white hover:bg-blue-700 shadow-md"
+                  }`}
+                >
+                  {(() => {
+                    const fullPath = Object.values(levelSelections)
+                      .filter(Boolean)
+                      .join(" > ");
+                    const cat = categories.find(
+                      (c) => c.category_path === fullPath
+                    );
+                    return cat && selectedCategories.has(cat.id)
+                      ? "Remove from Job"
+                      : "Add to Job";
+                  })()}
+                </button>
               </div>
+            </div>
+          )}
+
+          {/* Persistent Selection Footer */}
+          <div className="mt-auto pt-4 border-t border-slate-100 flex justify-between items-center">
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-slate-700">
+                {selectedCategories.size} Categories Selected
+              </span>
+              <span className="text-[10px] text-slate-400">
+                Total in processing queue
+              </span>
+            </div>
+            {selectedCategories.size > 0 && (
+              <button
+                onClick={() => setSelectedCategories(new Set())}
+                className="text-[10px] text-red-500 font-bold hover:underline uppercase"
+              >
+                Clear Queue
+              </button>
             )}
           </div>
         </div>
@@ -1109,7 +1201,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       )}
       <div className="flex justify-center">
         <button
-          onClick={() => generateFacets(false)} 
+          onClick={() => generateFacets(false)}
           disabled={isGenerating || selectedCategories.size === 0}
           className="inline-flex items-center gap-2 px-8 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
