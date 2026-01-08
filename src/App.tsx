@@ -1,5 +1,5 @@
 import { useAuth } from './contexts/AuthContext';
-import { useEffect, useState } from 'react'; // Added useState/useEffect
+import { useEffect, useState } from 'react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import { Loader } from 'lucide-react';
@@ -49,7 +49,13 @@ function App() {
     );
   }
 
-  if (isResettingPassword) {
+  // Check if user needs to set password (invited user who hasn't activated account)
+  if (user && !user.is_active) {
+    return <SetPassword onComplete={() => toggleResetScreen(false)} />;
+  }
+
+  // Check if manually navigated to reset password screen
+  if (isResettingPassword && user) {
     return <SetPassword onComplete={() => toggleResetScreen(false)} />;
   }
 
