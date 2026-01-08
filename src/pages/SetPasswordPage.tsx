@@ -1,25 +1,31 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { KeyRound, Loader } from 'lucide-react';
+import { useToast } from '../contexts/ToastContext';
 
 export default function SetPassword({ onComplete }: { onComplete: () => void }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
+  const toast=useToast()
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
     try {
-      const { error } = await supabase.auth.updateUser({
+      const { error:authError} = await supabase.auth.updateUser({
         password: password
       });
 
-      if (error) throw error;
+      if (authError) throw error;
+      const {data:{user}}=await supabase.auth.getUser()
+      if(user)
+      {
+        await supabase.from('user_profiles').update({'is_active':true}).eq('id',user.id)
+      }
 
-      alert("Account activated successfully!");
+       toast.success("Account activated successfully!");
       onComplete(); // Takes them back to the normal flow (which will now show Dashboard)
     } catch (err: any) {
       setError(err.message);

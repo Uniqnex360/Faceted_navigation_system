@@ -16,10 +16,8 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      // 1. First, perform the standard sign-in via AuthContext
       await signIn(email, password);
 
-      // 2. Immediately after successful auth, check the user's active status in user_profiles
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -33,7 +31,6 @@ export default function Login() {
 
         if (profileError) throw new Error("Error verifying account status");
 
-        // 3. If the profile is found and marked as inactive (blocked), kick them out
         if (profile && profile.is_active === false) {
           await signOut(); // Clear the session immediately
           throw new Error(

@@ -40,7 +40,7 @@ serve(async (req) => {
         full_name: full_name,
         role: role,
         client_id: client_id,
-        is_active: true
+        is_active: false
       })
       if (profileError) throw profileError
     return new Response(
