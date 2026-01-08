@@ -1,18 +1,18 @@
-import { useState } from 'react';
-import { LogIn, Loader, AlertCircle } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
+import { useState } from "react";
+import { LogIn, Loader, AlertCircle } from "lucide-react";
+import { useAuth } from "../contexts/AuthContext";
+import { supabase } from "../lib/supabase";
 
 export default function Login() {
   const { signIn, signOut } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    setError("");
     setIsLoading(true);
 
     try {
@@ -20,25 +20,29 @@ export default function Login() {
       await signIn(email, password);
 
       // 2. Immediately after successful auth, check the user's active status in user_profiles
-      const { data: { user } } = await supabase.auth.getUser();
-      
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       if (user) {
         const { data: profile, error: profileError } = await supabase
-          .from('user_profiles')
-          .select('is_active')
-          .eq('id', user.id)
+          .from("user_profiles")
+          .select("is_active")
+          .eq("id", user.id)
           .maybeSingle();
 
-        if (profileError) throw new Error('Error verifying account status');
+        if (profileError) throw new Error("Error verifying account status");
 
         // 3. If the profile is found and marked as inactive (blocked), kick them out
         if (profile && profile.is_active === false) {
           await signOut(); // Clear the session immediately
-          throw new Error('Your account has been deactivated. Please contact your administrator.');
+          throw new Error(
+            "Your account has been deactivated. Please contact your administrator."
+          );
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to sign in');
+      setError(err instanceof Error ? err.message : "Failed to sign in");
     } finally {
       setIsLoading(false);
     }
@@ -55,14 +59,15 @@ export default function Login() {
             <h1 className="text-2xl font-bold text-slate-900 mb-2">
               Facet Builder Pro
             </h1>
-            <p className="text-slate-600">
-              Sign in to your account
-            </p>
+            <p className="text-slate-600">Sign in to your account</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-2">
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-slate-700 mb-2"
+              >
                 Email Address
               </label>
               <input
@@ -77,7 +82,10 @@ export default function Login() {
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-2">
+              <label
+                htmlFor="password"
+                className="block text-sm font-medium text-slate-700 mb-2"
+              >
                 Password
               </label>
               <input
@@ -120,7 +128,8 @@ export default function Login() {
           <div className="mt-6 pt-6 border-t border-slate-200 text-center text-sm text-slate-600">
             <p>Demo Credentials:</p>
             <p className="mt-2 font-mono text-xs">
-              Admin: admin@demo.com / Admin@123<br />
+              Admin: admin@demo.com / Admin@123
+              <br />
               Client: client@demo.com / Client@123
             </p>
           </div>
