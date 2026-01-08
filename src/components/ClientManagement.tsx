@@ -197,7 +197,6 @@ export default function ClientManagement() {
       }
     );
   };
-  // --- SUPER ADMIN OPERATIONS ---
   const loadClients = async () => {
     const { data, error } = await supabase
       .from("clients")
@@ -207,9 +206,18 @@ export default function ClientManagement() {
     if (error) toast.error("Failed to load clients");
     else setClients((data as Client[]) || []);
   };
+    const normalizeName = (name: string) => name.toLowerCase().replace(/\s+/g, '');
 
   const createClient = async () => {
     if (!newClientName.trim()) return;
+    const normalizedNewName = normalizeName(newClientName);
+    const clientExists = clients.some(
+      (client) => normalizeName(client.name) === normalizedNewName
+    );
+     if (clientExists) {
+      toast.error(`A client with a similar name to "${newClientName}" already exists.`);
+      return; 
+    }
     setIsSubmitting(true);
     try {
       const { error } = await supabase.from("clients").insert({

@@ -20,6 +20,7 @@ export default function PromptManagement() {
   const toast = useToast();
 
   const { user } = useAuth();
+  const isSuperAdmin = user?.role === "super_admin";
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
   const [selectedPrompt, setSelectedPrompt] = useState<PromptTemplate | null>(
     null
@@ -209,15 +210,19 @@ export default function PromptManagement() {
       setIsSaving(false);
     }
   };
-  const hasChanges=selectedPrompt ? (()=>{
-    if(editContent!==selectedPrompt.template)return true 
-    if(selectedPrompt.name==='Industry Analysis')
-    {
-      const originalLevels=(selectedPrompt.metadata as any)?.industry_levels||{}
-      return JSON.stringify(industryLevels)!==JSON.stringify(originalLevels)
-    }
-    return false
-  })():false
+  const hasChanges = selectedPrompt
+    ? (() => {
+        if (editContent !== selectedPrompt.template) return true;
+        if (selectedPrompt.name === "Industry Analysis") {
+          const originalLevels =
+            (selectedPrompt.metadata as any)?.industry_levels || {};
+          return (
+            JSON.stringify(industryLevels) !== JSON.stringify(originalLevels)
+          );
+        }
+        return false;
+      })()
+    : false;
   const editPrompt = (prompt: PromptTemplate) => {
     setError(null);
     setSelectedPrompt(prompt);
@@ -296,7 +301,7 @@ export default function PromptManagement() {
       // if (selectedPrompt.name === "Geography") {
       //   versionContent = JSON.stringify(countryTemplates, null, 2);
       // }
-      let metadataToSave={...(selectedPrompt.metadata||{})}
+      let metadataToSave = { ...(selectedPrompt.metadata || {}) };
       await supabase.from("prompt_versions").insert({
         prompt_template_id: selectedPrompt.id,
         version: newVersion,
@@ -345,38 +350,39 @@ export default function PromptManagement() {
         );
         metadataToSave.industry_levels = nonEmptyLevels;
       }
-      const { error: versionError } = await supabase.from("prompt_versions").insert({
-        prompt_template_id: selectedPrompt.id,
-        version: newVersion,
-        template_content: versionContent,
-        variables: selectedPrompt.variables,
-        metadata: metadataToSave, 
-        edited_by: user.id,
-        change_notes: changeNotes,
-        is_active: true,
-      });
-      if(versionError) throw versionError
-       await supabase
+      const { error: versionError } = await supabase
+        .from("prompt_versions")
+        .insert({
+          prompt_template_id: selectedPrompt.id,
+          version: newVersion,
+          template_content: versionContent,
+          variables: selectedPrompt.variables,
+          metadata: metadataToSave,
+          edited_by: user.id,
+          change_notes: changeNotes,
+          is_active: true,
+        });
+      if (versionError) throw versionError;
+      await supabase
         .from("prompt_versions")
         .update({ is_active: false })
         .eq("prompt_template_id", selectedPrompt.id)
         .neq("version", newVersion);
 
-       const { error: templateUpdateError } = await supabase
+      const { error: templateUpdateError } = await supabase
         .from("prompt_templates")
         .update({
           template: versionContent,
           current_version: newVersion,
           updated_at: new Date().toISOString(),
-          metadata: metadataToSave, 
+          metadata: metadataToSave,
         })
         .eq("id", selectedPrompt.id);
       if (templateUpdateError) throw templateUpdateError;
       toast.success("New version saved successfully");
       setIsEditing(false);
       setSelectedPrompt(null);
-      await loadPrompts()
-
+      await loadPrompts();
     } catch (error: any) {
       toast.error(`Save failed: ${error.message}`);
       console.error("Error saving prompt version:", error);
@@ -422,7 +428,7 @@ export default function PromptManagement() {
         <h2 className="text-2xl font-bold text-slate-900">
           Prompt Template Management
         </h2>
-        {!isEditing && (
+        {!isEditing && isSuperAdmin && (
           <button
             onClick={() => setIsCreateModalOpen(true)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -470,48 +476,48 @@ export default function PromptManagement() {
             )}
 
             {/* {selectedPrompt.name === "Geography" && (
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Country-Specific Templates
-                </label>
-                <div className="space-y-3">
-                  {geographyCountries.map((country) => (
-                    <div key={country}>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">
-                        {country}
-                      </label>
-                      <div className="relative">
-                        <button
-                          onClick={() =>
-                            copyText(
-                              countryTemplates[country] || "",
-                              `country-${country}`
-                            )
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Country-Specific Templates
+                  </label>
+                  <div className="space-y-3">
+                    {geographyCountries.map((country) => (
+                      <div key={country}>
+                        <label className="block text-xs font-medium text-slate-500 mb-1">
+                          {country}
+                        </label>
+                        <div className="relative">
+                          <button
+                            onClick={() =>
+                              copyText(
+                                countryTemplates[country] || "",
+                                `country-${country}`
+                              )
+                            }
+                            className="text-xs inline-flex items-center gap-1 text-slate-500 hover:text-slate-800"
+                          >
+                            <Copy className="w-3 h-3" /> Copy
+                          </button>
+                          {copiedKey === `country-${country}` && (
+                            <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-slate-800 text-white text-xs rounded py-1 px-2">
+                              Copied!
+                            </span>
+                          )}
+                        </div>
+                        <textarea
+                          value={countryTemplates[country] || ""}
+                          onChange={(e) =>
+                            handleCountryTemplateChange(country, e.target.value)
                           }
-                          className="text-xs inline-flex items-center gap-1 text-slate-500 hover:text-slate-800"
-                        >
-                          <Copy className="w-3 h-3" /> Copy
-                        </button>
-                        {copiedKey === `country-${country}` && (
-                          <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-slate-800 text-white text-xs rounded py-1 px-2">
-                            Copied!
-                          </span>
-                        )}
+                          rows={4}
+                          placeholder={`Enter template content for ${country}...`}
+                          className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                        />
                       </div>
-                      <textarea
-                        value={countryTemplates[country] || ""}
-                        onChange={(e) =>
-                          handleCountryTemplateChange(country, e.target.value)
-                        }
-                        rows={4}
-                        placeholder={`Enter template content for ${country}...`}
-                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
-                      />
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )} */}
+              )} */}
 
             {/* UI for Marine Keywords (Levels 2-6) */}
             {selectedPrompt.name === "Industry Analysis" && (
@@ -582,8 +588,8 @@ export default function PromptManagement() {
                       />
 
                       {/* <div className="mt-2 text-xs text-slate-500">
-            <p>You can use <code className="bg-slate-100 px-1 py-0.5 rounded">{"${previousLevelResult}"}</code> to reference results from previous levels.</p>
-          </div> */}
+              <p>You can use <code className="bg-slate-100 px-1 py-0.5 rounded">{"${previousLevelResult}"}</code> to reference results from previous levels.</p>
+            </div> */}
                     </div>
                   ))}
                 </div>
@@ -604,7 +610,7 @@ export default function PromptManagement() {
               />
             </div>
 
-                        <div className="flex gap-3">
+            <div className="flex gap-3">
               {hasChanges && (
                 <button
                   onClick={savePromptVersion}
@@ -615,7 +621,7 @@ export default function PromptManagement() {
                   {isSaving ? "Saving..." : "Save New Version"}
                 </button>
               )}
-              
+
               <button
                 onClick={() => {
                   setIsEditing(false);
@@ -624,7 +630,7 @@ export default function PromptManagement() {
                 }}
                 className="px-6 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
               >
-                {hasChanges ? "Cancel" : "Close"} 
+                {hasChanges ? "Cancel" : "Close"}
                 {/* Changed text to 'Close' if no changes, just for better UX */}
               </button>
             </div>
@@ -650,7 +656,7 @@ export default function PromptManagement() {
                 <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
                   Level
                 </th>
-              
+
                 <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
                   Version
                 </th>
@@ -671,32 +677,42 @@ export default function PromptManagement() {
                   <td className="px-6 py-4 text-sm text-slate-600">
                     Level {prompt.level}
                   </td>
-                
                   <td className="px-6 py-4 text-sm text-slate-600">
                     v{prompt.current_version || 1}
                   </td>
+
+                  {/* Corrected Master Template Column */}
                   <td className="px-6 py-4">
                     <button
                       onClick={async () => {
                         const isMaster = await checkIsMaster(prompt.id);
                         toggleMasterTemplate(prompt.id, isMaster);
                       }}
-                      className="text-yellow-500 hover:text-yellow-600"
+                      // Disable the button for non-admins
+                      disabled={!isSuperAdmin}
+                      className="text-yellow-500 hover:text-yellow-600 disabled:text-slate-300 disabled:cursor-not-allowed"
+                      title="Toggle Master Template"
                     >
                       <Star className="w-5 h-5" />
                     </button>
                   </td>
+
+                  {/* Corrected Actions Column */}
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => editPrompt(prompt)}
-                        className="p-1 text-blue-600 hover:bg-blue-50 rounded"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
+                      {isSuperAdmin && (
+                        <button
+                          onClick={() => editPrompt(prompt)}
+                          className="p-1 text-blue-600 hover:bg-blue-50 rounded"
+                          title="Edit Prompt"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => showHistory(prompt)}
                         className="p-1 text-slate-600 hover:bg-slate-50 rounded"
+                        title="View History"
                       >
                         <History className="w-4 h-4" />
                       </button>
@@ -861,7 +877,7 @@ export default function PromptManagement() {
                             </div>
 
                             {/* RESTORE BUTTON - Only show if not the latest version */}
-                            {!isLatest && (
+                            {!isLatest && isSuperAdmin && (
                               <button
                                 onClick={() => restoreVersion(version)}
                                 disabled={isRestoring}
@@ -903,20 +919,27 @@ export default function PromptManagement() {
                               <pre className="bg-slate-50 border border-slate-100 p-3 rounded-md text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-60">
                                 {version.template_content}
                               </pre>
-{version.metadata?.industry_levels && Object.keys(version.metadata.industry_levels).length > 0 && (
-  <div className="mt-3 border-t border-slate-100 pt-3">
-    <h4 className="font-semibold text-slate-800 text-xs uppercase tracking-wider mb-2">
-      Included Sub-Levels
-    </h4>
-    <div className="flex flex-wrap gap-2">
-      {Object.keys(version.metadata.industry_levels).map((lvl) => (
-        <span key={lvl} className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded border border-slate-200">
-          Level {lvl}
-        </span>
-      ))}
-    </div>
-  </div>
-)}
+                              {version.metadata?.industry_levels &&
+                                Object.keys(version.metadata.industry_levels)
+                                  .length > 0 && (
+                                  <div className="mt-3 border-t border-slate-100 pt-3">
+                                    <h4 className="font-semibold text-slate-800 text-xs uppercase tracking-wider mb-2">
+                                      Included Sub-Levels
+                                    </h4>
+                                    <div className="flex flex-wrap gap-2">
+                                      {Object.keys(
+                                        version.metadata.industry_levels
+                                      ).map((lvl) => (
+                                        <span
+                                          key={lvl}
+                                          className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded border border-slate-200"
+                                        >
+                                          Level {lvl}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
                               {copiedKey === `v-${version.version}` && (
                                 <span className="absolute top-2 right-2 bg-slate-800 text-white text-[10px] rounded py-0.5 px-1.5 opacity-90">
                                   Copied
