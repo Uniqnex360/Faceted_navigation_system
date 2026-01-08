@@ -385,7 +385,6 @@ export default function ClientManagement() {
       toast.success(`Invitation sent to ${newUserEmail}`);
       setNewUserEmail("");
 
-      // Reload list
       const { data } = await supabase
         .from("user_profiles")
         .select("*")
@@ -700,7 +699,7 @@ export default function ClientManagement() {
             ) : (
               <>
                 <ToggleLeft className="w-7 h-7 text-red-400 group-hover:text-red-500" />
-                <span className="text-xs font-bold text-red-500 uppercase">Blocked</span>
+                <span className="text-xs font-bold text-red-500 uppercase">Inactive</span>
               </>
             )}
           </button>

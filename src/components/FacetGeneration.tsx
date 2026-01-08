@@ -14,6 +14,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { Category, PromptTemplate, RecommendedFacet } from "../types";
 import { PROMPT_EXECUTION_ORDER } from "../utils/PromptOrder";
 import { useToast } from "../contexts/ToastContext";
+import React from "react";
 
 interface FacetGenerationProps {
   onComplete: () => void;
@@ -35,13 +36,18 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
   });
   const [categories, setCategories] = useState<Category[]>([]);
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
+  const [globalSearch, setGlobalSearch] = useState("");
+  const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(
     new Set()
   );
   const [selectedPrompts, setSelectedPrompts] = useState<Set<string>>(
     new Set()
   );
-
+  const [openDropdown, setOpenDropdown] = useState<number | null>(null);
+  const [levelSearchQueries, setLevelSearchQueries] = useState<{
+    [key: number]: string;
+  }>({ 1: "", 2: "", 3: "" });
   const [projectName, setProjectName] = useState("");
   const [categorySearch, setCategorySearch] = useState("");
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
@@ -81,7 +87,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
   }, [prompts]);
   useEffect(() => {
     loadData();
-  }, [user]);
+  }, [user,onComplete]);
 
   const toggleFacetForExport = (categoryId: string, facetId: string) => {
     setSelectedFacetsForExport((prev) => {
@@ -99,43 +105,155 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
     });
   };
   const getLevelCategories = (level: number) => {
+    let filtered = [];
+    const searchTerm = levelSearchQueries[level].toLowerCase();
+    const visibleOnly = categories.filter(c => c.is_visible !== false);
     if (level === 1) {
-      const uniqueL1 = Array.from(
-        new Set(
-          categories.map((c) => {
-            return c.category_path.split(">")[0].trim();
-          })
-        )
-      );
-      return uniqueL1.sort().map((name) => ({ id: name, name }));
-    }
-
-    const parentPathParts = [];
-    for (let i = 1; i < level; i++) {
-      if (levelSelections[i]) parentPathParts.push(levelSelections[i]);
-      else return [];
-    }
-
-    const parentPathString = parentPathParts.join(" > ");
-
-    const children = categories.filter(
+    const uniqueL1 = Array.from(
+      new Set(visibleOnly.map((c) => c.category_path.split(">")[0].trim()))
+    );
+    filtered = uniqueL1.sort().map((name) => ({ id: name, name }));
+  }  else {
+      const parentPathParts = [];
+      for (let i = 1; i < level; i++) {
+        if (levelSelections[i]) parentPathParts.push(levelSelections[i]);
+        else return [];
+      }
+      const parentPathString = parentPathParts.join(" > ");
+      const children = visibleOnly.filter(
       (c) =>
         c.category_path.startsWith(parentPathString + " >") ||
         c.category_path === parentPathString
     );
+      const uniqueNames = Array.from(
+        new Set(
+          children.map((c) => c.category_path.split(">")[level - 1]?.trim())
+        )
+      ).filter(Boolean);
+      filtered = uniqueNames.sort().map((name) => ({ id: name, name }));
+    }
 
-    const uniqueNames = Array.from(
-      new Set(
-        children.map((c) => {
-          const parts = c.category_path.split(">");
-          return parts[level - 1]?.trim();
-        })
-      )
-    ).filter(Boolean);
-
-    return uniqueNames.sort().map((name) => ({ id: name, name }));
+    return filtered.filter((cat) =>
+      cat.name.toLowerCase().includes(searchTerm)
+    );
   };
+const globalSearchResults = useMemo(() => {
+  const searchTerm = globalSearch.toLowerCase().trim();
+  
+  const activeLevels = Object.values(levelSelections).filter(Boolean);
+  const constraintPath = activeLevels.join(" > ");
 
+  return categories
+    .filter((c) => {
+      if (c.is_visible === false) return false; 
+      const path = c.category_path.toLowerCase();
+      
+      const matchesSearch = searchTerm === "" || path.includes(searchTerm);
+      
+      const matchesConstraint = constraintPath === "" || 
+                                 c.category_path.startsWith(constraintPath);
+
+      return matchesSearch && matchesConstraint;
+    })
+    .slice(0, 50); // Performance limit
+}, [categories, globalSearch, levelSelections]);
+
+  const selectFromGlobal = (category: Category) => {
+    setIsGlobalSearchOpen(false);
+    const pathParts = category.category_path.split(" > ").map((p) => p.trim());
+
+    const newSelections: { [key: number]: string } = {
+      1: "",
+      2: "",
+      3: "",
+      4: "",
+      5: "",
+      6: "",
+    };
+    pathParts.forEach((part, idx) => {
+      if (idx < 6) newSelections[idx + 1] = part;
+    });
+
+    // 3. Update the cascading dropdown states
+    setLevelSelections(newSelections);
+    setGlobalSearch("");
+    setIsGlobalSearchOpen(false);
+
+    // 4. Highlight the fact that this item is ready to be added
+    toast.info(`Navigation synced to: ${category.name}`);
+  };
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setOpenDropdown(null);
+      setIsGlobalSearchOpen(false); // Add this
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpenDropdown(null);
+        setIsGlobalSearchOpen(false); // Add this
+        setGlobalSearch(""); // Optional: clear search on escape
+      }
+    };
+
+    if (openDropdown !== null || isGlobalSearchOpen) {
+      window.addEventListener("click", handleClickOutside);
+      window.addEventListener("keydown", handleKeyDown);
+    }
+
+    return () => {
+      window.removeEventListener("click", handleClickOutside);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openDropdown, isGlobalSearchOpen]);
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (selectedCategories.size > 0) {
+        e.preventDefault();
+        e.returnValue =
+          "You have items in your processing queue. Are you sure you want to leave?";
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [selectedCategories.size]);
+
+  // Stop propagation on the dropdown itself so clicking search doesn't close it
+  // (Update the container div)
+  const handleResetFilters = () => {
+    if (!Object.values(levelSelections).some(Boolean)) return; // Don't ask if already empty
+
+    toast.confirm(
+      "Reset all selected levels? Your current navigation path will be cleared.",
+      () => {
+        setLevelSelections({ 1: "", 2: "", 3: "", 4: "", 5: "", 6: "" });
+        setLevelSearchQueries({ 1: "", 2: "", 3: "" });
+        toast.success("Filters reset");
+      },
+      { confirmText: "Reset", cancelText: "Stay" }
+    );
+  };
+  const handleClearQueue = () => {
+    toast.confirm(
+      `Remove all ${selectedCategories.size} categories from the queue?`,
+      () => {
+        setSelectedCategories(new Set());
+        toast.success("Queue cleared");
+      },
+      { confirmText: "Clear All", cancelText: "Keep" }
+    );
+  };
+  const confirmRemoveItem = (id: string, path: string) => {
+    toast.confirm(
+      `Remove "${path}" from the processing queue?`,
+      () => {
+        toggleCategory(id);
+        toast.success("Item removed");
+      },
+      { confirmText: "Remove", cancelText: "Cancel" }
+    );
+  };
   const handleAddToJob = () => {
     if (!levelSelections[1] || !levelSelections[2]) {
       toast.error("Please select at least Level 1 and Level 2!");
@@ -165,10 +283,15 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
   };
   const handleLevelChange = (level: number, id: string) => {
     const newSelections = { ...levelSelections, [level]: id };
-    for (let i = level + 1; i <= 6; i++) {
-      newSelections[i] = "";
+
+    if (level < 3) {
+      for (let i = level + 1; i <= 6; i++) {
+        newSelections[i] = "";
+      }
+      setLevelSelections(newSelections);
+    } else {
+      setLevelSelections(newSelections);
     }
-    setLevelSelections(newSelections);
   };
   const filteredCategories = categories.filter((c) => {
     const matchSearches =
@@ -214,6 +337,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       supabase
         .from("categories")
         .select("*")
+        .eq('is_visible',true)
         .match(clientFilter)
         .order("category_path"),
       supabase
@@ -360,7 +484,17 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       setIsGenerating(false);
     }
   };
+  const handleAddToJobSpecific = (fullPath: string) => {
+    const targetCategory = categories.find((c) =>
+      c.category_path.trim().startsWith(fullPath.trim())
+    );
 
+    if (targetCategory) {
+      toggleCategory(targetCategory.id);
+      const isRemoving = selectedCategories.has(targetCategory.id);
+      toast.success(isRemoving ? `Removed from queue` : `Added to queue`);
+    }
+  };
   const generateFacets = async (forceNew = false) => {
     if (selectedCategories.size === 0) return;
 
@@ -998,48 +1132,187 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
       </div> */}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <div className="bg-white rounded-lg border border-slate-200 p-6 flex flex-col h-[500px]">
+        <div className="bg-white rounded-lg border border-slate-200 p-6 flex flex-col h-[600px]">
           <div className="flex items-center justify-between mb-6">
             <h3 className="font-bold text-slate-900 flex items-center gap-2">
               <Filter className="w-4 h-4 text-blue-600" /> Category Schema
             </h3>
             <button
-              onClick={() =>
-                setLevelSelections({ 1: "", 2: "", 3: "", 4: "", 5: "", 6: "" })
-              }
+              onClick={handleResetFilters}
               className="text-xs text-blue-600 hover:underline font-semibold"
             >
               Reset Filters
             </button>
           </div>
+          <div className="relative mb-6" onClick={(e) => e.stopPropagation()}>
+  <label className="text-[10px] font-bold text-blue-500 uppercase mb-1 block tracking-widest">
+    {levelSelections[1] ? `Quick Find in ${levelSelections[1]}` : "Quick Find (Full Hierarchy)"}
+  </label>
+  <div className="relative">
+    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+    <input 
+      type="text"
+      placeholder="Search full hierarchy..."
+      className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm"
+      value={globalSearch}
+      onChange={(e) => {
+        setGlobalSearch(e.target.value);
+        setIsGlobalSearchOpen(true);
+      }}
+      // Opens the results even if nothing is typed yet
+      onFocus={() => setIsGlobalSearchOpen(true)}
+    />
+  </div>
 
+  {/* RESULTS OVERLAY */}
+  {isGlobalSearchOpen && (
+    <div className="absolute z-[70] w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-72 overflow-y-auto p-2 animate-in fade-in slide-in-from-top-2">
+      {globalSearchResults.length > 0 ? (
+        globalSearchResults.map((cat) => (
+          <div 
+            key={cat.id}
+            onClick={() => selectFromGlobal(cat)}
+            className="p-3 hover:bg-blue-50 rounded-lg cursor-pointer group border-b border-slate-50 last:border-0 transition-colors"
+          >
+            <div className="flex items-center gap-1 text-[10px] text-slate-400 group-hover:text-blue-400 transition-colors mb-0.5">
+              {/* Show the parent path clearly */}
+              {cat.category_path.includes(' > ') ? (
+                cat.category_path.split(' > ').slice(0, -1).join(' / ')
+              ) : "Root"}
+            </div>
+            <div className="text-sm font-bold text-slate-700 group-hover:text-blue-700">
+              {cat.name}
+            </div>
+          </div>
+        ))
+      ) : (
+        <div className="p-4 text-center text-xs text-slate-400 italic">No categories found</div>
+      )}
+    </div>
+  )}
+</div>
+
+          <div className="flex items-center gap-4 mb-6">
+            <div className="h-[1px] bg-slate-100 flex-1"></div>
+            <span className="text-[10px] text-slate-300 font-bold uppercase">
+              Or Find By Level
+            </span>
+            <div className="h-[1px] bg-slate-100 flex-1"></div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             {[1, 2, 3].map((level) => {
               const levelCats = getLevelCategories(level);
               const isDisabled = level > 1 && !levelSelections[level - 1];
+              const isExpanded = openDropdown === level;
+              const selectedName = levelSelections[level];
 
               return (
-                <div key={level} className="space-y-1">
+                <div
+                  key={level}
+                  className="relative space-y-1"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                     Level {level}
                   </label>
-                  <select
-                    disabled={isDisabled}
-                    value={levelSelections[level]}
-                    onChange={(e) => handleLevelChange(level, e.target.value)}
-                    className={`w-full p-2 text-sm border rounded-lg outline-none transition-all ${
+
+                  <div
+                    onClick={() =>
+                      !isDisabled && setOpenDropdown(isExpanded ? null : level)
+                    }
+                    className={`w-full p-2 text-sm border rounded-lg flex justify-between items-center cursor-pointer transition-all ${
                       isDisabled
                         ? "bg-slate-50 border-slate-100 text-slate-300"
-                        : "bg-white border-slate-200 focus:ring-2 focus:ring-blue-500"
+                        : "bg-white border-slate-200 hover:border-blue-400"
+                    } ${
+                      isExpanded ? "ring-2 ring-blue-500 border-blue-500" : ""
                     }`}
                   >
-                    <option value="">Select Category</option>
-                    {levelCats.map((cat) => (
-                      <option key={cat.id} value={cat.id}>
-                        {cat.name}
-                      </option>
-                    ))}
-                  </select>
+                    <span className="truncate">
+                      {selectedName || "Select Category"}
+                    </span>
+                    <Filter
+                      className={`w-3 h-3 transition-transform ${
+                        isExpanded ? "rotate-180" : ""
+                      }`}
+                    />
+                  </div>
+
+                  {isExpanded && (
+                    <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl animate-in fade-in slide-in-from-top-1">
+                      <div className="p-2 border-b border-slate-100 sticky top-0 bg-white rounded-t-lg">
+                        <div className="relative">
+                          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                          <input
+                            autoFocus
+                            type="text"
+                            placeholder="Type to search..."
+                            value={levelSearchQueries[level]}
+                            onChange={(e) =>
+                              setLevelSearchQueries((prev) => ({
+                                ...prev,
+                                [level]: e.target.value,
+                              }))
+                            }
+                            className="w-full pl-7 pr-2 py-1.5 text-xs border border-slate-100 rounded bg-slate-50 outline-none focus:bg-white focus:ring-1 focus:ring-blue-400"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Inside the Options List div... map(cat) logic */}
+                      <div className="max-h-48 overflow-y-auto p-1">
+                        {levelCats.length > 0 ? (
+                          levelCats.map((cat) => {
+                            // Logic: Is THIS specific option already in our processing queue?
+                            const fullPathForThisOpt =
+                              level === 1
+                                ? cat.name
+                                : level === 2
+                                ? `${levelSelections[1]} > ${cat.name}`
+                                : `${levelSelections[1]} > ${levelSelections[2]} > ${cat.name}`;
+
+                            const actualDbRecord = categories.find((c) =>
+                              c.category_path.startsWith(fullPathForThisOpt)
+                            );
+                            const isInQueue =
+                              actualDbRecord &&
+                              selectedCategories.has(actualDbRecord.id);
+
+                            return (
+                              <div
+                                key={cat.id}
+                                onClick={() => {
+                                  if (level < 3) {
+                                    handleLevelChange(level, cat.id);
+                                    setOpenDropdown(null);
+                                  } else {
+                                    // Level 3 specific: Toggle directly in the list
+                                    handleAddToJobSpecific(fullPathForThisOpt);
+                                  }
+                                }}
+                                className={`px-3 py-2 text-xs rounded cursor-pointer flex items-center justify-between transition-colors ${
+                                  selectedName === cat.id
+                                    ? "bg-blue-50 text-blue-700 font-bold"
+                                    : "hover:bg-slate-50 text-slate-700"
+                                }`}
+                              >
+                                <span>{cat.name}</span>
+
+                                {/* Show a tick if it's already in the queue */}
+                                {isInQueue && (
+                                  <CheckSquare className="w-3 h-3 text-blue-600" />
+                                )}
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="px-3 py-4 text-xs text-slate-400 text-center italic">
+                            No categories found
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1104,7 +1377,7 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
               </div>
               {selectedCategories.size > 0 && (
                 <button
-                  onClick={() => setSelectedCategories(new Set())}
+                  onClick={handleClearQueue}
                   className="text-[10px] text-red-500 font-bold hover:underline uppercase"
                 >
                   Clear Queue
@@ -1125,7 +1398,9 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
                         {cat?.category_path || "Unknown Category"}
                       </span>
                       <button
-                        onClick={() => toggleCategory(id)}
+                        onClick={() =>
+                          confirmRemoveItem(id, cat?.category_path || "")
+                        }
                         className="text-slate-400 hover:text-red-500 transition-colors"
                         title="Remove from queue"
                       >

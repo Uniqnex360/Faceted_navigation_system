@@ -3,6 +3,7 @@ import React, {
   useContext,
   useState,
   useCallback,
+  useEffect,
 } from "react";
 import {
   CheckCircle,
@@ -93,6 +94,22 @@ function ToastContainer({
   toasts: Toast[];
   dismiss: (id: string) => void;
 }) {
+  useEffect(()=>{
+    const handleEsc=(event:KeyboardEvent)=>{
+      if(event.key==='Escape' &&  toasts.length>0)
+      {
+        const t=toasts[0]
+        if(t.type==='confirm' && t.options?.onCancel)
+        {
+          t.options.onCancel()
+        }
+        dismiss(t.id)
+      }
+    }
+    window.addEventListener('keydown',handleEsc)
+    return ()=>window.removeEventListener('keydown',handleEsc)
+  },[toasts,dismiss])
+
   if (toasts.length === 0) return null;
 
   const t = toasts[0];

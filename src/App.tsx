@@ -10,12 +10,36 @@ function App() {
   const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   useEffect(() => {
-    // Detect if the user landed here from an invite/recovery email link
+    // 1. Initial detection for invite links
     const hash = window.location.hash;
-    if (hash && (hash.includes('access_token') || hash.includes('type=invite'))) {
+    if (hash && (hash.includes('type=invite') || hash.includes('access_token'))) {
       setIsResettingPassword(true);
+      window.history.replaceState({ screen: 'reset' }, "", "");
     }
+
+    // 2. Listener for Browser Back/Forward buttons
+    const handlePopState = (event: PopStateEvent) => {
+      const state = event.state;
+      if (state?.screen === 'reset') {
+        setIsResettingPassword(true);
+      } else {
+        setIsResettingPassword(false);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  // Update history when manually changing screens
+  const toggleResetScreen = (val: boolean) => {
+    if (val) {
+      window.history.pushState({ screen: 'reset' }, "", "");
+    } else {
+      window.history.pushState({ screen: 'main' }, "", "");
+    }
+    setIsResettingPassword(val);
+  };
 
   if (loading) {
     return (
@@ -28,12 +52,10 @@ function App() {
     );
   }
 
-  // 1. If they are coming from an invite link, show Set Password screen
   if (isResettingPassword) {
-    return <SetPassword onComplete={() => setIsResettingPassword(false)} />;
+    return <SetPassword onComplete={() => toggleResetScreen(false)} />;
   }
 
-  // 2. Otherwise, follow your normal Auth flow
   return user ? <Dashboard /> : <Login />;
 }
 
