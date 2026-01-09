@@ -15,6 +15,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { Client } from "../types";
+import { access } from "node:fs";
 
 interface Profile {
   id: string;
@@ -178,7 +179,6 @@ export default function ClientManagement() {
     }
   };
 
-  // --- DELETE CLIENT ---
   const handleDeleteClient = (client: Client) => {
     toast.confirm(
       `Delete ${client.name}? This will block access for all users under this company.`,
@@ -206,7 +206,8 @@ export default function ClientManagement() {
     if (error) toast.error("Failed to load clients");
     else setClients((data as Client[]) || []);
   };
-    const normalizeName = (name: string) => name.toLowerCase().replace(/\s+/g, '');
+  const normalizeName = (name: string) =>
+    name.toLowerCase().replace(/\s+/g, "");
 
   const createClient = async () => {
     if (!newClientName.trim()) return;
@@ -214,9 +215,11 @@ export default function ClientManagement() {
     const clientExists = clients.some(
       (client) => normalizeName(client.name) === normalizedNewName
     );
-     if (clientExists) {
-      toast.error(`A client with a similar name to "${newClientName}" already exists.`);
-      return; 
+    if (clientExists) {
+      toast.error(
+        `A client with a similar name to "${newClientName}" already exists.`
+      );
+      return;
     }
     setIsSubmitting(true);
     try {
@@ -244,22 +247,19 @@ export default function ClientManagement() {
     }
   };
   const handleDeleteClick = (targetUser: Profile) => {
-    // 1. Restriction: Don't delete self
     if (targetUser.id === user?.id) {
       toast.error("You cannot delete your own account.");
       return;
     }
 
-    // 2. Restriction: Client Admin can only delete Client Users
     if (user?.role === "client_admin" && targetUser.role !== "client_user") {
       toast.error("You only have permission to delete regular users.");
       return;
     }
 
-    // 3. Use your custom toast.confirm
     toast.confirm(
       `Are you sure you want to remove ${targetUser.email}?`,
-      () => executeDelete(targetUser), // onConfirm
+      () => executeDelete(targetUser), 
       {
         confirmText: "Delete User",
         cancelText: "Keep User",
@@ -268,9 +268,26 @@ export default function ClientManagement() {
   };
 
   const executeDelete = async (targetUser: Profile) => {
+    const {data:{session}}=await supabase.auth.getSession()
+    if(!session)throw new Error("Authentication required!")
     setIsSubmitting(true);
     try {
-      // Logic: Remove from database
+      const response=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-user`,{
+        method:"POST",
+        headers:{
+          "Content-Type":'application/json',
+          'Authorization':`Bearer ${session.access_token}`
+        },
+        body:JSON.stringify({
+          user_id_to_delete:targetUser.id
+        })
+      })
+      const result=await response.json()
+      if(!response.ok)
+      {
+        throw new Error(result.error||"Failed to delete user from authentication system!")
+      }
+      
       const { error } = await supabase
         .from("user_profiles")
         .delete()
@@ -280,7 +297,6 @@ export default function ClientManagement() {
 
       toast.success(`${targetUser.email} has been removed.`);
 
-      // Refresh user list
       const targetClientId =
         user?.role === "client_admin" ? user.client_id : selectedClient?.id;
       const { data } = await supabase
@@ -306,7 +322,6 @@ export default function ClientManagement() {
     if (error) toast.error("Failed to load users");
     else setClientUsers((data as Profile[]) || []);
   };
-  // --- TOGGLE USER STATUS ---
   const toggleUserActive = async (
     targetUser: Profile,
     currentStatus: boolean
@@ -531,22 +546,26 @@ export default function ClientManagement() {
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end items-center gap-3">
                       {editingClient?.id === client.id ? (
-                         <div className="flex gap-2">
-    <button
-      onClick={saveEdit}
-      // DISABLED IF: Name AND Email are exactly the same as the original client record
-      disabled={isSubmitting || (editName === client.name && editEmail === (client.contact_email || ""))}
-      className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed transition-all"
-    >
-      {isSubmitting ? "Saving..." : "Save Changes"}
-    </button>
-    <button
-      onClick={() => setSelectedEditingClient(null)}
-      className="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-xs font-bold hover:bg-slate-200"
-    >
-      Cancel
-    </button>
-  </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={saveEdit}
+                            // DISABLED IF: Name AND Email are exactly the same as the original client record
+                            disabled={
+                              isSubmitting ||
+                              (editName === client.name &&
+                                editEmail === (client.contact_email || ""))
+                            }
+                            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed transition-all"
+                          >
+                            {isSubmitting ? "Saving..." : "Save Changes"}
+                          </button>
+                          <button
+                            onClick={() => setSelectedEditingClient(null)}
+                            className="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-xs font-bold hover:bg-slate-200"
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       ) : (
                         <>
                           <button
@@ -604,38 +623,39 @@ export default function ClientManagement() {
           <p className="text-slate-500">User Management</p>
         </div>
       </div>
-
-      <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
-        <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-          <Mail className="w-4 h-4 text-blue-600" /> Invite New User
-        </h3>
-        <div className="flex flex-col md:flex-row gap-4">
-          <input
-            type="email"
-            value={newUserEmail}
-            onChange={(e) => setNewUserEmail(e.target.value)}
-            placeholder="User Email Address"
-            className="flex-1 px-4 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <select
-            value={newUserRole}
-            onChange={(e) => setNewUserRole(e.target.value)}
-            className="px-4 py-2 border border-slate-300 rounded-lg bg-white"
-          >
-            <option value="client_user">Regular User</option>
-            {user.role === "super_admin" && (
-              <option value="client_admin">Client Admin</option>
-            )}
-          </select>
-          <button
-            onClick={inviteUser}
-            disabled={isSubmitting || !newUserEmail}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-          >
-            Send Invite
-          </button>
+      {user.role === "super_admin" && (
+        <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
+          <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+            <Mail className="w-4 h-4 text-blue-600" /> Invite New User
+          </h3>
+          <div className="flex flex-col md:flex-row gap-4">
+            <input
+              type="email"
+              value={newUserEmail}
+              onChange={(e) => setNewUserEmail(e.target.value)}
+              placeholder="User Email Address"
+              className="flex-1 px-4 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <select
+              value={newUserRole}
+              onChange={(e) => setNewUserRole(e.target.value)}
+              className="px-4 py-2 border border-slate-300 rounded-lg bg-white"
+            >
+              <option value="client_user">Regular User</option>
+              {user.role === "super_admin" && (
+                <option value="client_admin">Client Admin</option>
+              )}
+            </select>
+            <button
+              onClick={inviteUser}
+              disabled={isSubmitting || !newUserEmail}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              Send Invite
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         <table className="w-full text-left text-sm">
@@ -648,116 +668,156 @@ export default function ClientManagement() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
-  {clientUsers.map((profile) => (
-    <tr key={profile.id} className="hover:bg-slate-50 transition-colors">
-      {/* COLUMN 1: USER INFO */}
-      <td className="px-6 py-4">
-        {editingUser?.id === profile.id ? (
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-bold text-blue-500 uppercase">Full Name</label>
-            <input 
-              className="border border-blue-200 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-              value={editUserFullName}
-              onChange={(e) => setEditUserFullName(e.target.value)}
-            />
-            <span className="text-[10px] text-slate-400">{profile.email}</span>
-          </div>
-        ) : (
-          <>
-            <div className="font-medium text-slate-900">{profile.email}</div>
-            <div className="text-xs text-slate-500">{profile.full_name || "Invited"}</div>
-          </>
-        )}
-      </td>
-
-      {/* COLUMN 2: ROLE */}
-      <td className="px-6 py-4">
-        {editingUser?.id === profile.id ? (
-          <select 
-            className="border border-blue-200 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-            value={editUserRole}
-            onChange={(e) => setEditUserRole(e.target.value as any)}
-          >
-            <option value="client_user">User</option>
-            <option value="client_admin">Admin</option>
-          </select>
-        ) : (
-          <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${profile.role === "client_admin" ? "bg-purple-100 text-purple-700" : "bg-slate-100 text-slate-700"}`}>
-            {profile.role === "client_admin" && <Shield className="w-3 h-3" />}
-            {profile.role === "client_admin" ? "Admin" : "User"}
-          </span>
-        )}
-      </td>
-
-      {/* COLUMN 3: STATUS (BLOCK/UNBLOCK) */}
-      <td className="px-6 py-4">
-        {editingUser?.id === profile.id ? (
-           <span className="text-xs text-slate-400 italic">Save to see status</span>
-        ) : (
-          <button 
-            onClick={() => toggleUserBlock(profile)}
-            className="flex items-center gap-2 group"
-            disabled={profile.id === user?.id}
-          >
-            {profile.is_active ? (
-              <>
-                <ToggleRight className="w-7 h-7 text-green-500 group-hover:text-green-600" />
-                <span className="text-xs font-bold text-green-600 uppercase">Active</span>
-              </>
-            ) : (
-              <>
-                <ToggleLeft className="w-7 h-7 text-red-400 group-hover:text-red-500" />
-                <span className="text-xs font-bold text-red-500 uppercase">Inactive</span>
-              </>
-            )}
-          </button>
-        )}
-      </td>
-
-      {/* COLUMN 4: ACTIONS */}
-      <td className="px-6 py-4 text-right">
-        <div className="flex justify-end gap-2">
-          {editingUser?.id === profile.id ? (
-            <div className="flex gap-2">
-    <button
-      onClick={saveUserEdit}
-      // DISABLED IF: Full Name AND Role are exactly the same as the original profile record
-      disabled={isSubmitting || (editUserFullName === (profile.full_name || "") && editUserRole === profile.role)}
-      className="text-blue-600 disabled:text-slate-300 disabled:cursor-not-allowed hover:underline text-xs font-bold"
-    >
-      {isSubmitting ? "..." : "Save"}
-    </button>
-    <button
-      onClick={() => setEditingUser(null)}
-      className="text-slate-400 hover:underline text-xs"
-    >
-      Cancel
-    </button>
-  </div>
-
-          ) : (
-            <>
-              <button 
-                onClick={() => startEditUser(profile)} 
-                className="text-slate-500 hover:text-slate-700 p-1"
-                disabled={user?.role === 'client_admin' && profile.role === 'client_admin' && profile.id !== user.id}
+            {clientUsers.map((profile) => (
+              <tr
+                key={profile.id}
+                className="hover:bg-slate-50 transition-colors"
               >
-                Edit
-              </button>
-              <button
-                onClick={() => handleDeleteClick(profile)}
-                disabled={profile.id === user?.id || (user?.role === 'client_admin' && profile.role !== 'client_user')}
-                className={`p-1 rounded-md ${profile.id === user?.id ? 'text-slate-200' : 'text-red-400 hover:text-red-600'}`}
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </>
-          )}
-        </div>
-      </td>
-    </tr>
-  ))}
-</tbody>
+                {/* COLUMN 1: USER INFO */}
+                <td className="px-6 py-4">
+                  {editingUser?.id === profile.id ? (
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] font-bold text-blue-500 uppercase">
+                        Full Name
+                      </label>
+                      <input
+                        className="border border-blue-200 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                        value={editUserFullName}
+                        onChange={(e) => setEditUserFullName(e.target.value)}
+                      />
+                      <span className="text-[10px] text-slate-400">
+                        {profile.email}
+                      </span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="font-medium text-slate-900">
+                        {profile.email}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {profile.full_name || "Invited"}
+                      </div>
+                    </>
+                  )}
+                </td>
+
+                {/* COLUMN 2: ROLE */}
+                <td className="px-6 py-4">
+                  {editingUser?.id === profile.id ? (
+                    <select
+                      className="border border-blue-200 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                      value={editUserRole}
+                      onChange={(e) => setEditUserRole(e.target.value as any)}
+                    >
+                      <option value="client_user">User</option>
+                      <option value="client_admin">Admin</option>
+                    </select>
+                  ) : (
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                        profile.role === "client_admin"
+                          ? "bg-purple-100 text-purple-700"
+                          : "bg-slate-100 text-slate-700"
+                      }`}
+                    >
+                      {profile.role === "client_admin" && (
+                        <Shield className="w-3 h-3" />
+                      )}
+                      {profile.role === "client_admin" ? "Admin" : "User"}
+                    </span>
+                  )}
+                </td>
+
+                {/* COLUMN 3: STATUS (BLOCK/UNBLOCK) */}
+                <td className="px-6 py-4">
+                  {editingUser?.id === profile.id ? (
+                    <span className="text-xs text-slate-400 italic">
+                      Save to see status
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => toggleUserBlock(profile)}
+                      className="flex items-center gap-2 group"
+                      disabled={profile.id === user?.id}
+                    >
+                      {profile.is_active ? (
+                        <>
+                          <ToggleRight className="w-7 h-7 text-green-500 group-hover:text-green-600" />
+                          <span className="text-xs font-bold text-green-600 uppercase">
+                            Active
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <ToggleLeft className="w-7 h-7 text-red-400 group-hover:text-red-500" />
+                          <span className="text-xs font-bold text-red-500 uppercase">
+                            Inactive
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </td>
+
+                {/* COLUMN 4: ACTIONS */}
+                <td className="px-6 py-4 text-right">
+                  <div className="flex justify-end gap-2">
+                    {editingUser?.id === profile.id ? (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={saveUserEdit}
+                          // DISABLED IF: Full Name AND Role are exactly the same as the original profile record
+                          disabled={
+                            isSubmitting ||
+                            (editUserFullName === (profile.full_name || "") &&
+                              editUserRole === profile.role)
+                          }
+                          className="text-blue-600 disabled:text-slate-300 disabled:cursor-not-allowed hover:underline text-xs font-bold"
+                        >
+                          {isSubmitting ? "..." : "Save"}
+                        </button>
+                        <button
+                          onClick={() => setEditingUser(null)}
+                          className="text-slate-400 hover:underline text-xs"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => startEditUser(profile)}
+                          className="text-slate-500 hover:text-slate-700 p-1"
+                          disabled={
+                            user?.role === "client_admin" &&
+                            profile.role === "client_admin" &&
+                            profile.id !== user.id
+                          }
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteClick(profile)}
+                          disabled={
+                            profile.id === user?.id ||
+                            (user?.role === "client_admin" &&
+                              profile.role !== "client_user")
+                          }
+                          className={`p-1 rounded-md ${
+                            profile.id === user?.id
+                              ? "text-slate-200"
+                              : "text-red-400 hover:text-red-600"
+                          }`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </div>
     </div>

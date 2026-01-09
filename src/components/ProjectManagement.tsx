@@ -1,24 +1,18 @@
 import { useState, useEffect } from "react";
-import {
-  FolderPlus,
-  Trash2,
-  Eye,
-  X,
-  Calendar,
-  BarChart,
-  Tag,
-  User,
-} from "lucide-react";
+import { FolderPlus, Trash2, Eye, X } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
-import { FacetGenerationJob } from "../types";
+import { FacetGenerationJob, RecommendedFacet } from "../types";
+import { useToast } from "../contexts/ToastContext";
 
 export default function ProjectManagement() {
   const { user } = useAuth();
+  const toast = useToast();
   const [projects, setProjects] = useState<FacetGenerationJob[]>([]);
-  const [categoryMap,setCategoryMap]=useState<Record<string,string>>({})
+  const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
   const [projectName, setProjectName] = useState("");
-  const [selectedProject, setSelectedProject] =useState<FacetGenerationJob | null>(null);
+  const [selectedProject, setSelectedProject] =
+    useState<FacetGenerationJob | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [historicalFacets, setHistoricalFacets] = useState<RecommendedFacet[]>(
@@ -29,46 +23,30 @@ export default function ProjectManagement() {
   useEffect(() => {
     loadProjects();
   }, [user]);
-  // Add this new function inside your ProjectManagement component
 
   const viewProjectDetails = async (project: FacetGenerationJob) => {
-    if (!project) return;
+  if (!project) return;
+  setSelectedProject(project);
+  setIsDetailModalOpen(true);
+  setIsLoadingDetails(true);
+  setHistoricalFacets([]);
 
-    setSelectedProject(project);
-    setIsDetailModalOpen(true);
-    setIsLoadingDetails(true);
-    setHistoricalFacets([]); // Clear previous results
+  try {
+    const { data: facetData, error: facetError } = await supabase
+      .from("recommended_facets")
+      .select("*, categories (name)")
+      .eq("job_id", project.id)
+      .order("sort_order");
 
-    try {
-      // Find all job IDs that share the same project name to consolidate results
-      const { data: jobsInProject, error: jobsError } = await supabase
-        .from("facet_generation_jobs")
-        .select("id")
-        .eq("project_name", project.project_name);
+    if (facetError) throw facetError;
 
-      if (jobsError) throw jobsError;
-
-      const jobIds = (jobsInProject || []).map((j) => j.id);
-
-      if (jobIds.length > 0) {
-        // Fetch all facets from all jobs related to this project
-        const { data: facetData, error: facetError } = await supabase
-          .from("recommended_facets")
-          .select("*, categories (name)") // Join with categories to get the name
-          .in("job_id", jobIds)
-          .order("sort_order");
-
-        if (facetError) throw facetError;
-
-        setHistoricalFacets((facetData as any[]) || []);
-      }
-    } catch (error) {
-      console.error("Error loading project details:", error);
-      // You could add a user-facing error state here if desired
-    } finally {
-      setIsLoadingDetails(false);
-    }
-  };
+    setHistoricalFacets((facetData as any[]) || []);
+  } catch (error) {
+    console.error("Error loading project details:", error);
+  } finally {
+    setIsLoadingDetails(false);
+  }
+};
   const loadProjects = async () => {
     if (!user) return;
 
@@ -81,16 +59,19 @@ export default function ProjectManagement() {
       query.eq("client_id", user.client_id);
     }
 
-    const { data:jobs,error } = await query;
-    if(error)return
-    const allCategoryIds=Array.from(new Set((jobs||[]).flatMap((j)=>j.category_ids||[])))
-    if(allCategoryIds.length>0)
-    {
-      const {data:catData}=await supabase.from('categories').select('id,name').in('id',allCategoryIds)
-      const mapping:Record<string,string>={}
-     catData?.forEach((c) => (mapping[c.id] = c.name));
-     setCategoryMap(mapping);
-        
+    const { data: jobs, error } = await query;
+    if (error) return;
+    const allCategoryIds = Array.from(
+      new Set((jobs || []).flatMap((j) => j.category_ids || []))
+    );
+    if (allCategoryIds.length > 0) {
+      const { data: catData } = await supabase
+        .from("categories")
+        .select("id,name")
+        .in("id", allCategoryIds);
+      const mapping: Record<string, string> = {};
+      catData?.forEach((c) => (mapping[c.id] = c.name));
+      setCategoryMap(mapping);
     }
     setProjects((jobs as FacetGenerationJob[]) || []);
   };
@@ -119,11 +100,21 @@ export default function ProjectManagement() {
     }
   };
 
-  const deleteProject = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this project?")) return;
+  const deleteProject = async (projectToDelete: FacetGenerationJob) => {
+    toast.confirm(`Are you sure? This action cannot be undone.`, async () => {
+      const { error } = await supabase
+        .from("facet_generation_jobs")
+        .delete()
+        .eq("id", projectToDelete.id);
+      if (error) {
+        console.error("Error deleting project", error);
+        toast.error("Failed to delete project");
+      } else {
+        toast.success(`Project deleted successfully!`);
+        await loadProjects();
+      }
+    });
 
-    await supabase.from("facet_generation_jobs").delete().eq("id", id);
-    await loadProjects();
   };
 
   const getStatusColor = (status: string) => {
@@ -195,23 +186,29 @@ export default function ProjectManagement() {
           <tbody className="divide-y divide-slate-200">
             {projects.map((project) => (
               <tr key={project.id} className="hover:bg-slate-50">
-                
-        <div className="flex flex-wrap items-center gap-1 px-6 py-4">
-          {project.category_ids && project.category_ids.length>0 ? (
-            project.category_ids.map((id,index)=>(
-              <span key={id} className="flex items-center text-[11px] text-slate-500">
-                <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                  {categoryMap[id]||"Loading..."}
-                </span>
-                {index<project.category_ids.length-1 && (
-                  <span className="mx-1 text-slate-300">/</span>
-                )}
-              </span>
-            ))
-          ):(
-            <span className="text-xs text-slate-400 italic">No categories linked!</span>
-          )}
-        </div>
+                <td className="px-6 py-4">
+                  <div className="flex flex-wrap items-center gap-1 px-6 py-4">
+                    {project.category_ids && project.category_ids.length > 0 ? (
+                      project.category_ids.map((id, index) => (
+                        <span
+                          key={id}
+                          className="flex items-center text-[11px] text-slate-500"
+                        >
+                          <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                            {categoryMap[id] || "Loading..."}
+                          </span>
+                          {index < project.category_ids.length - 1 && (
+                            <span className="mx-1 text-slate-300">/</span>
+                          )}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-slate-400 italic">
+                        No categories linked!
+                      </span>
+                    )}
+                  </div>
+                </td>
                 <td className="px-6 py-4">
                   <span
                     className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
@@ -233,17 +230,19 @@ export default function ProjectManagement() {
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => viewProjectDetails(project)} // <-- CHANGE THIS
+                      onClick={() => viewProjectDetails(project)}
                       className="p-1 text-blue-600 hover:bg-blue-50 rounded"
                     >
                       <Eye className="w-4 h-4" />
                     </button>
-                    <button
-                      onClick={() => deleteProject(project.id)}
-                      className="p-1 text-red-600 hover:bg-red-50 rounded"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {user?.role === "super_admin" && (
+                      <button
+                        onClick={() => deleteProject(project)}
+                        className="p-1 text-red-600 hover:bg-red-50 rounded"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -267,7 +266,8 @@ export default function ProjectManagement() {
           <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] flex flex-col">
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-10">
               <h3 className="text-xl font-semibold text-slate-900">
-                Project Details: {selectedProject.project_name || "Untitled Project"}
+                {/* Project Details:{" "}
+                {selectedProject.project_name || "Untitled Project"} */}
               </h3>
               <button
                 onClick={() => setIsDetailModalOpen(false)}
@@ -276,7 +276,7 @@ export default function ProjectManagement() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="p-6 overflow-y-auto">
               {isLoadingDetails ? (
                 <div className="text-center py-12">
@@ -284,62 +284,90 @@ export default function ProjectManagement() {
                 </div>
               ) : (
                 <div className="space-y-8">
-                  {/* Basic Project Info */}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <p className="text-sm font-medium text-slate-500">Status</p>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(selectedProject.status)}`}>
+                      <p className="text-sm font-medium text-slate-500">
+                        Status
+                      </p>
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
+                          selectedProject.status
+                        )}`}
+                      >
                         {selectedProject.status}
                       </span>
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-slate-500">Created</p>
-                      <p className="text-slate-800">{new Date(selectedProject.created_at).toLocaleDateString()}</p>
+                      <p className="text-sm font-medium text-slate-500">
+                        Created
+                      </p>
+                      <p className="text-slate-800">
+                        {new Date(
+                          selectedProject.created_at
+                        ).toLocaleDateString()}
+                      </p>
                     </div>
                   </div>
 
-                  {/* Historical Facets Section */}
                   <div>
-                    <h4 className="text-lg font-semibold text-slate-900 mb-4">Generated Facet History</h4>
+                    <h4 className="text-lg font-semibold text-slate-900 mb-4">
+                      Generated Facet History
+                    </h4>
                     {historicalFacets.length > 0 ? (
-                       <div className="border border-slate-200 rounded-lg overflow-hidden">
+                      <div className="border border-slate-200 rounded-lg overflow-hidden">
                         <table className="w-full">
-                            <thead className="bg-slate-50">
-                              <tr>
-                                <th className="px-4 py-2 text-left text-sm font-semibold text-slate-600">Category</th>
-                                <th className="px-4 py-2 text-left text-sm font-semibold text-slate-600">Facet Name</th>
-                                <th className="px-4 py-2 text-left text-sm font-semibold text-slate-600">Priority</th>
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left text-sm font-semibold text-slate-600">
+                                Category
+                              </th>
+                              <th className="px-4 py-2 text-left text-sm font-semibold text-slate-600">
+                                Facet Name
+                              </th>
+                              <th className="px-4 py-2 text-left text-sm font-semibold text-slate-600">
+                                Priority
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200">
+                            {historicalFacets.map((facet) => (
+                              <tr key={facet.id}>
+                                <td className="px-4 py-2 text-sm text-slate-500">
+                                  {facet.categories?.name || "N/A"}
+                                </td>
+                                <td className="px-4 py-2 text-sm font-medium text-slate-800">
+                                  {facet.facet_name}
+                                </td>
+                                <td className="px-4 py-2 text-sm">
+                                  <span
+                                    className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                      facet.priority === "High"
+                                        ? "bg-red-100 text-red-700"
+                                        : facet.priority === "Medium"
+                                        ? "bg-yellow-100 text-yellow-700"
+                                        : "bg-green-100 text-green-700"
+                                    }`}
+                                  >
+                                    {facet.priority}
+                                  </span>
+                                </td>
                               </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-200">
-                              {historicalFacets.map(facet => (
-                                <tr key={facet.id}>
-                                  <td className="px-4 py-2 text-sm text-slate-500">{facet.categories?.name || 'N/A'}</td>
-                                  <td className="px-4 py-2 text-sm font-medium text-slate-800">{facet.facet_name}</td>
-                                  <td className="px-4 py-2 text-sm">
-                                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                        facet.priority === 'High' ? 'bg-red-100 text-red-700' :
-                                        facet.priority === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
-                                        'bg-green-100 text-green-700'
-                                      }`}>
-                                        {facet.priority}
-                                      </span>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
+                            ))}
+                          </tbody>
                         </table>
-                       </div>
+                      </div>
                     ) : (
                       <div className="text-center py-8 border-2 border-dashed border-slate-200 rounded-lg">
-                        <p className="text-slate-500">No facets have been generated for this project yet.</p>
+                        <p className="text-slate-500">
+                          No facets have been generated for this project yet.
+                        </p>
                       </div>
                     )}
                   </div>
                 </div>
               )}
             </div>
-             <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end">
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end">
               <button
                 onClick={() => setIsDetailModalOpen(false)}
                 className="px-6 py-2 bg-slate-200 text-slate-800 rounded-lg hover:bg-slate-300"
