@@ -623,7 +623,7 @@ export default function ClientManagement() {
           <p className="text-slate-500">User Management</p>
         </div>
       </div>
-      {user.role === "super_admin" && (
+     {(user.role === "super_admin" || user.role === "client_admin") && (
         <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
           <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
             <Mail className="w-4 h-4 text-blue-600" /> Invite New User

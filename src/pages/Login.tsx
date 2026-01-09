@@ -122,14 +122,7 @@ export default function Login() {
             </button>
           </form>
 
-          <div className="mt-6 pt-6 border-t border-slate-200 text-center text-sm text-slate-600">
-            <p>Demo Credentials:</p>
-            <p className="mt-2 font-mono text-xs">
-              Admin: admin@demo.com / Admin@123
-              <br />
-              Client: client@demo.com / Client@123
-            </p>
-          </div>
+          
         </div>
       </div>
     </div>

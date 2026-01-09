@@ -13,6 +13,7 @@ import {
   Download,
   Users,
   FileText,
+  Building2,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import ProjectManagement from "../components/ProjectManagement";
@@ -28,7 +29,11 @@ type View =
   | "prompts"
   | "generate"
   | "clients";
-
+interface Client {
+  id: string;
+  name: string;
+  company_name: string;
+}
 interface DashboardStats {
   facets_recommended: number;
   jobs_in_progress: number;
@@ -36,11 +41,16 @@ interface DashboardStats {
   pending_categories: number;
   downloads: number;
   total_projects: number;
+  total_users?: number;
+  total_admins?: number;
+  total_clients?: number;
+  queue_count: number;
 }
 
 export default function Dashboard() {
   const { user, signOut } = useAuth();
   const [currentView, setCurrentView] = useState<View>("dashboard");
+  const [client, setClient] = useState<Client | null>(null);
   const [stats, setStats] = useState<DashboardStats>({
     facets_recommended: 0,
     jobs_in_progress: 0,
@@ -48,20 +58,21 @@ export default function Dashboard() {
     pending_categories: 0,
     downloads: 0,
     total_projects: 0,
+    queue_count: 0,
   });
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
       if (event.state && event.state.view) {
         setCurrentView(event.state.view);
       } else {
-        setCurrentView('dashboard');
+        setCurrentView("dashboard");
       }
     };
 
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, []);
-    const navigateTo = (view: View) => {
+  const navigateTo = (view: View) => {
     if (view !== currentView) {
       window.history.pushState({ view }, "", "");
       setCurrentView(view);
@@ -69,6 +80,9 @@ export default function Dashboard() {
   };
   useEffect(() => {
     loadDashboardStats();
+    if (user && user.role !== "super_admin") {
+      loadClientInfo();
+    }
   }, [user]);
 
   const loadDashboardStats = async () => {
@@ -77,22 +91,48 @@ export default function Dashboard() {
     const clientFilter =
       user.role === "super_admin" ? {} : { client_id: user.client_id };
 
-    const [jobsData, categoriesData, exportsData, projectsData] =
-      await Promise.all([
-        supabase
-          .from("facet_generation_jobs")
-          .select("status")
-          .match(clientFilter),
-        supabase.from("categories").select("id").match(clientFilter),
-        supabase.from("export_history").select("id").match(clientFilter),
-        supabase.from("facet_generation_jobs").select("id").match(clientFilter),
-      ]);
-
+    const [
+      jobsData,
+      categoriesData,
+      exportsData,
+      projectsData,
+      usersData,
+      queueData,
+    ] = await Promise.all([
+      supabase
+        .from("facet_generation_jobs")
+        .select("status")
+        .match(clientFilter),
+      supabase.from("categories").select("id").match(clientFilter),
+      supabase.from("export_history").select("id").match(clientFilter),
+      supabase.from("facet_generation_jobs").select("id").match(clientFilter),
+      user.role === "client_admin"
+        ? supabase
+            .from("user_profiles")
+            .select("role")
+            .eq("client_id", user.client_id)
+        : Promise.resolve({ data: [] }),
+      supabase
+        .from("user_queues")
+        .select("queue")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+    ]);
+    console.log("Users Data:", usersData);
+    console.log("Users:", usersData.data);
     const jobs = jobsData.data || [];
     const completed = jobs.filter((j) => j.status === "completed").length;
     const inProgress = jobs.filter((j) => j.status === "processing").length;
     const pending = jobs.filter((j) => j.status === "pending").length;
-
+    const users = usersData.data || [];
+    const totalAdmins = users.filter((u) => u.role === "client_admin").length;
+    const totalClients = users.filter((u) => u.role === "client_user").length;
+    const queueCount = (queueData.data?.queue as any[])?.length || 0;
+    console.log("Total users found:", users.length);
+    console.log(
+      "User roles:",
+      users.map((u) => u.role)
+    );
     setStats({
       facets_recommended: completed,
       jobs_in_progress: inProgress,
@@ -100,9 +140,23 @@ export default function Dashboard() {
       pending_categories: categoriesData.data?.length || 0,
       downloads: exportsData.data?.length || 0,
       total_projects: projectsData.data?.length || 0,
+      total_users: users.length,
+      total_admins: totalAdmins,
+      total_clients: totalClients,
+      queue_count: queueCount,
     });
   };
-
+  const loadClientInfo = async () => {
+    if (!user?.client_id) return;
+    const { data, error } = await supabase
+      .from("clients")
+      .select("*")
+      .eq("id", user.client_id)
+      .single();
+    if (!error && data) {
+      setClient(data as Client);
+    }
+  };
   const menuItems = [
     { id: "dashboard" as View, label: "Dashboard", icon: LayoutDashboard },
     { id: "projects" as View, label: "Projects", icon: FolderOpen },
@@ -129,7 +183,11 @@ export default function Dashboard() {
             </h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-              <div className="bg-white p-6 rounded-lg border border-slate-200">
+              {/* Facets Recommended - goes to Generate */}
+              <div
+                onClick={() => navigateTo("generate")}
+                className="bg-white p-6 rounded-lg border border-slate-200 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"
+              >
                 <div className="flex items-center justify-between mb-4">
                   <div className="p-3 bg-green-100 rounded-lg">
                     <CheckCircle className="w-6 h-6 text-green-600" />
@@ -144,22 +202,39 @@ export default function Dashboard() {
                 <p className="text-sm text-slate-600">Successfully generated</p>
               </div>
 
-              <div className="bg-white p-6 rounded-lg border border-slate-200">
+              {/* In Progress - goes to Generate */}
+               <div
+                onClick={() => navigateTo("generate")}
+                className="bg-white p-6 rounded-lg border border-slate-200 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"
+              >
                 <div className="flex items-center justify-between mb-4">
                   <div className="p-3 bg-blue-100 rounded-lg">
                     <TrendingUp className="w-6 h-6 text-blue-600" />
                   </div>
-                  <span className="text-3xl font-bold text-slate-900">
-                    {stats.jobs_in_progress}
-                  </span>
+                  <div className="text-right">
+                    <span className="text-3xl font-bold text-slate-900 block">
+                      {stats.queue_count}
+                    </span>
+                  </div>
                 </div>
                 <h3 className="font-semibold text-slate-900 mb-1">
                   In Progress
                 </h3>
-                <p className="text-sm text-slate-600">Currently processing</p>
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span>Processing</span>
+                  {stats.queue_count > 0 && (
+                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                       + {stats.queue_count} in queue
+                     </span>
+                  )}
+                </div>
               </div>
 
-              <div className="bg-white p-6 rounded-lg border border-slate-200">
+              {/* Yet to Start - goes to Generate */}
+              <div
+                onClick={() => navigateTo("generate")}
+                className="bg-white p-6 rounded-lg border border-slate-200 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"
+              >
                 <div className="flex items-center justify-between mb-4">
                   <div className="p-3 bg-yellow-100 rounded-lg">
                     <Clock className="w-6 h-6 text-yellow-600" />
@@ -174,7 +249,35 @@ export default function Dashboard() {
                 <p className="text-sm text-slate-600">Pending jobs</p>
               </div>
 
-              <div className="bg-white p-6 rounded-lg border border-slate-200">
+              {/* Total Users - goes to Clients (super_admin only) */}
+              {user?.role === "super_admin" && (
+                <div
+                  onClick={() => navigateTo("clients")}
+                  className="bg-white p-6 rounded-lg border border-slate-200 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-teal-100 rounded-lg">
+                      <Users className="w-6 h-6 text-teal-600" />
+                    </div>
+                    <span className="text-3xl font-bold text-slate-900">
+                      {stats.total_users || 0}
+                    </span>
+                  </div>
+                  <h3 className="font-semibold text-slate-900 mb-1">
+                    Total Users
+                  </h3>
+                  <div className="text-sm text-slate-600 space-y-1">
+                    <p>Admins: {stats.total_admins || 0}</p>
+                    <p>Users: {stats.total_clients || 0}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Categories - goes to Upload */}
+              <div
+                onClick={() => navigateTo("upload")}
+                className="bg-white p-6 rounded-lg border border-slate-200 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"
+              >
                 <div className="flex items-center justify-between mb-4">
                   <div className="p-3 bg-slate-100 rounded-lg">
                     <AlertCircle className="w-6 h-6 text-slate-600" />
@@ -189,7 +292,11 @@ export default function Dashboard() {
                 <p className="text-sm text-slate-600">Total uploaded</p>
               </div>
 
-              <div className="bg-white p-6 rounded-lg border border-slate-200">
+              {/* Downloads - goes to Projects */}
+              <div
+                onClick={() => navigateTo("projects")}
+                className="bg-white p-6 rounded-lg border border-slate-200 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"
+              >
                 <div className="flex items-center justify-between mb-4">
                   <div className="p-3 bg-indigo-100 rounded-lg">
                     <Download className="w-6 h-6 text-indigo-600" />
@@ -204,7 +311,11 @@ export default function Dashboard() {
                 <p className="text-sm text-slate-600">Export history</p>
               </div>
 
-              <div className="bg-white p-6 rounded-lg border border-slate-200">
+              {/* Total Projects - goes to Projects */}
+              <div
+                onClick={() => navigateTo("projects")}
+                className="bg-white p-6 rounded-lg border border-slate-200 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"
+              >
                 <div className="flex items-center justify-between mb-4">
                   <div className="p-3 bg-purple-100 rounded-lg">
                     <FolderOpen className="w-6 h-6 text-purple-600" />
@@ -226,13 +337,13 @@ export default function Dashboard() {
               </h3>
               <div className="flex flex-wrap gap-3">
                 <button
-                  onClick={() => navigateTo("projects")} 
+                  onClick={() => navigateTo("projects")}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                 >
                   Create New Project
                 </button>
                 <button
-                  onClick={() => navigateTo("upload")} 
+                  onClick={() => navigateTo("upload")}
                   className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
                 >
                   Upload Categories
@@ -267,63 +378,67 @@ export default function Dashboard() {
   };
 
   return (
-  /* 1. Added h-screen and overflow-hidden to the parent wrapper */
-  <div className="h-screen bg-slate-50 flex overflow-hidden">
-    
-    {/* 2. SIDEBAR: Added sticky/fixed behavior and h-full */}
-    <aside className="w-64 bg-white border-r border-slate-200 flex flex-col h-full shrink-0">
-      <div className="p-6 border-b border-slate-200">
-        <h1 className="text-xl font-bold text-slate-900">Facet Builder Pro</h1>
-        <p className="text-sm text-slate-600 mt-1 truncate">{user?.email}</p>
-        {user?.role === 'super_admin' && (
-          <span className="inline-block mt-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs font-medium rounded">
-            Super Admin
-          </span>
-        )}
-        {user?.role === 'client_admin' && (
-          <span className="inline-block mt-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">
-            Admin
-          </span>
-        )}
-      </div>
+    <div className="h-screen bg-slate-50 flex overflow-hidden">
+      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col h-full shrink-0">
+        <div className="p-6 border-b border-slate-200">
+          <h1 className="text-xl font-bold text-slate-900">
+            Facet Builder Pro
+          </h1>
+          <p className="text-sm text-slate-600 mt-1 truncate">{user?.email}</p>
+          {user?.role === "super_admin" && (
+            <span className="inline-block mt-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs font-medium rounded">
+              Super Admin
+            </span>
+          )}
+          {user?.role === "client_admin" && (
+            <span className="inline-block mt-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">
+              Admin
+            </span>
+          )}
+          {user?.role !== "super_admin" && client && (
+            <div className="flex items-center gap-2 mt-2 px-2 py-1 bg-slate-100 rounded text-xs">
+              <Building2 className="w-3 h-3 text-slate-500" />
+              <span className="text-slate-700 font-medium truncate">
+                {client.name || client.company_name || "Unknown client"}
+              </span>
+            </div>
+          )}
+        </div>
 
-      {/* 3. Added overflow-y-auto here so if you have many menu items, ONLY the nav scrolls */}
-      <nav className="p-4 flex-1 overflow-y-auto">
-        {menuItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.id}
-               onClick={() => navigateTo(item.id)} 
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg mb-1 transition-colors ${
-                currentView === item.id
-                  ? 'bg-blue-50 text-blue-700 font-medium'
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <Icon className="w-5 h-5" />
-              {item.label}
-            </button>
-          );
-        })}
-      </nav>
+        <nav className="p-4 flex-1 overflow-y-auto">
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                onClick={() => navigateTo(item.id)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg mb-1 transition-colors ${
+                  currentView === item.id
+                    ? "bg-blue-50 text-blue-700 font-medium"
+                    : "text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
 
-      {/* 4. Removed absolute positioning to keep it naturally pinned to bottom of flex container */}
-      <div className="p-4 border-t border-slate-200 bg-white">
-        <button
-          onClick={signOut}
-          className="w-full flex items-center gap-3 px-4 py-3 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-        >
-          <LogOut className="w-5 h-5" />
-          Sign Out
-        </button>
-      </div>
-    </aside>
+        <div className="p-4 border-t border-slate-200 bg-white">
+          <button
+            onClick={signOut}
+            className="w-full flex items-center gap-3 px-4 py-3 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+          >
+            <LogOut className="w-5 h-5" />
+            Sign Out
+          </button>
+        </div>
+      </aside>
 
-    {/* 5. MAIN CONTENT: Stays scrollable independently */}
-    <main className="flex-1 p-8 overflow-y-auto h-full scroll-smooth">
-      {renderContent()}
-    </main>
-  </div>
-);
+      <main className="flex-1 p-8 overflow-y-auto h-full scroll-smooth">
+        {renderContent()}
+      </main>
+    </div>
+  );
 }
