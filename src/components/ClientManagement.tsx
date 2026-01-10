@@ -431,7 +431,6 @@ export default function ClientManagement() {
     return <div className="p-8 text-center text-slate-500">Access Denied</div>;
   }
 
-  // VIEW 1: SUPER ADMIN CLIENT LIST
   if (view === "list" && user.role === "super_admin") {
     return (
       <div>
@@ -499,7 +498,6 @@ export default function ClientManagement() {
                     )}
                   </td>
 
-                  {/* COLUMN 2: STATUS OR EMAIL (Toggle hidden during edit) */}
                   <td className="px-6 py-4">
                     {editingClient?.id === client.id ? (
                       <div className="flex flex-col gap-1">
@@ -542,14 +540,12 @@ export default function ClientManagement() {
                     )}
                   </td>
 
-                  {/* COLUMN 3: ACTIONS */}
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end items-center gap-3">
                       {editingClient?.id === client.id ? (
                         <div className="flex gap-2">
                           <button
                             onClick={saveEdit}
-                            // DISABLED IF: Name AND Email are exactly the same as the original client record
                             disabled={
                               isSubmitting ||
                               (editName === client.name &&
@@ -603,7 +599,6 @@ export default function ClientManagement() {
     );
   }
 
-  // VIEW 2: USER MANAGEMENT (Both Super Admin and Client Admin)
   return (
     <div>
       {user.role === "super_admin" && (
@@ -673,7 +668,6 @@ export default function ClientManagement() {
                 key={profile.id}
                 className="hover:bg-slate-50 transition-colors"
               >
-                {/* COLUMN 1: USER INFO */}
                 <td className="px-6 py-4">
                   {editingUser?.id === profile.id ? (
                     <div className="flex flex-col gap-1">
@@ -701,7 +695,6 @@ export default function ClientManagement() {
                   )}
                 </td>
 
-                {/* COLUMN 2: ROLE */}
                 <td className="px-6 py-4">
                   {editingUser?.id === profile.id ? (
                     <select
@@ -728,7 +721,6 @@ export default function ClientManagement() {
                   )}
                 </td>
 
-                {/* COLUMN 3: STATUS (BLOCK/UNBLOCK) */}
                 <td className="px-6 py-4">
                   {editingUser?.id === profile.id ? (
                     <span className="text-xs text-slate-400 italic">
@@ -759,14 +751,12 @@ export default function ClientManagement() {
                   )}
                 </td>
 
-                {/* COLUMN 4: ACTIONS */}
                 <td className="px-6 py-4 text-right">
                   <div className="flex justify-end gap-2">
                     {editingUser?.id === profile.id ? (
                       <div className="flex gap-2">
                         <button
                           onClick={saveUserEdit}
-                          // DISABLED IF: Full Name AND Role are exactly the same as the original profile record
                           disabled={
                             isSubmitting ||
                             (editUserFullName === (profile.full_name || "") &&

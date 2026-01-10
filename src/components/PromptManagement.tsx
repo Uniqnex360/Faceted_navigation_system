@@ -22,6 +22,8 @@ export default function PromptManagement() {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === "super_admin";
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [clients, setClients] = useState<any[]>([]);
   const [selectedPrompt, setSelectedPrompt] = useState<PromptTemplate | null>(
     null
   );
@@ -52,29 +54,54 @@ export default function PromptManagement() {
   useEffect(() => {
     loadPrompts();
   }, [user]);
-  // Add this new function inside your PromptManagement component
+
+  useEffect(() => {
+    loadPrompts();
+  }, [selectedClientId]);
 
   const showHistory = async (prompt: PromptTemplate) => {
     if (!prompt) return;
 
-    setSelectedPrompt(prompt); // Set the prompt we're looking at
+    setSelectedPrompt(prompt);
     setIsHistoryModalOpen(true);
     setIsLoadingHistory(true);
 
     try {
-      // Fetch versions and the email of the user who edited it
-      const { data, error } = await supabase
+      const historyClientId = isSuperAdmin ? selectedClientId : user?.client_id;
+
+      // 1. Try to fetch client-specific history first
+      let { data: clientData, error: clientError } = await supabase
         .from("prompt_versions")
-        .select(`*`)
+        .select(
+          `id, version, template_content, change_notes, created_at, metadata, edited_by`
+        )
         .eq("prompt_template_id", prompt.id)
-        .order("version", { ascending: false }); // Show newest first
+        .eq("client_id", historyClientId) // Only fetch if this ID exists
+        .order("version", { ascending: false });
 
-      if (error) throw error;
+      if (clientError) throw clientError;
 
-      setPromptVersions(data || []);
+      // 2. EDGE CASE: If no client-specific history exists AND we are in a client context
+      if ((!clientData || clientData.length === 0) && historyClientId) {
+        // Fallback: Fetch Global history instead
+        const { data: globalData, error: globalError } = await supabase
+          .from("prompt_versions")
+          .select(
+            `id, version, template_content, change_notes, created_at, metadata, edited_by`
+          )
+          .eq("prompt_template_id", prompt.id)
+          .is("client_id", null) // Fetch the Master history
+          .order("version", { ascending: false });
+
+        if (globalError) throw globalError;
+        setPromptVersions(globalData || []);
+      } else {
+        // Show the client-specific history we found
+        setPromptVersions(clientData || []);
+      }
     } catch (err: any) {
-      console.error("Error loading prompt history:", err);
-      setError("Failed to load version history.");
+      console.error("History Error:", err);
+      setError(err.message);
     } finally {
       setIsLoadingHistory(false);
     }
@@ -83,31 +110,63 @@ export default function PromptManagement() {
     if (!user) return;
     setError(null);
 
-    const query = supabase
+    // 1. Fetch ALL base templates (Global)
+    const { data: baseData, error: dbError } = await supabase
       .from("prompt_templates")
       .select("*")
       .eq("is_active", true);
 
-    if (user.role !== "admin") {
-      query.or(`client_id.eq.${user.client_id},client_id.is.null`);
-    }
-    const { data, error: dbError } = await query;
     if (dbError) {
-      console.error("Error loading prompts:", dbError);
       setError(`Failed to load prompts: ${dbError.message}`);
-      setPrompts([]);
-    } else {
-      const loadedPrompts = (data as PromptTemplate[]) || [];
+      return;
+    }
 
-      const sortedPrompts = loadedPrompts.sort((a, b) => {
+    // 2. Identify the Client ID
+    // If Super Admin: use the dropdown selection
+    // If Client: use their own assigned client_id
+    const activeClientId = isSuperAdmin ? selectedClientId : user.client_id;
+
+    let finalPrompts = [...(baseData || [])];
+
+    // 3. APPLY OVERRIDES (This is the critical part for the client)
+    if (activeClientId) {
+      const { data: overrides } = await supabase
+        .from("prompt_versions")
+        .select("*")
+        .eq("client_id", activeClientId)
+        .eq("is_active", true);
+
+      if (overrides && overrides.length > 0) {
+        finalPrompts = finalPrompts.map((base) => {
+          const override = overrides.find(
+            (o) => o.prompt_template_id === base.id
+          );
+          if (override) {
+            // The client now sees the custom content, but it looks like a standard prompt to them
+            return {
+              ...base,
+              template: override.template_content,
+              current_version: override.version,
+              metadata: override.metadata || base.metadata,
+              is_override: true,
+            };
+          }
+          return base;
+        });
+      }
+    }
+
+    // Filter out any prompts that are strictly for other clients (if any)
+    // and sort by execution order
+    const filteredAndSorted = finalPrompts
+      .filter((p) => !p.client_id || p.client_id === activeClientId)
+      .sort((a, b) => {
         const indexA = PROMPT_EXECUTION_ORDER.indexOf(a.name);
         const indexB = PROMPT_EXECUTION_ORDER.indexOf(b.name);
-        const finalIndexA = indexA === -1 ? Infinity : indexA;
-        const finalIndexB = indexB === -1 ? Infinity : indexB;
-        return finalIndexA - finalIndexB;
+        return (indexA === -1 ? 99 : indexA) - (indexB === -1 ? 99 : indexB);
       });
-      setPrompts(sortedPrompts);
-    }
+
+    setPrompts(filteredAndSorted);
   };
   const restoreVersion = (versionToRestore: any) => {
     if (!selectedPrompt || !user) return;
@@ -160,6 +219,15 @@ export default function PromptManagement() {
       { confirmText: "Yes,Restore", cancelText: "Cancel" }
     );
   };
+  useEffect(() => {
+    if (isSuperAdmin) {
+      const fetchClients = async () => {
+        const { data } = await supabase.from("clients").select("id, name");
+        setClients(data || []);
+      };
+      fetchClients();
+    }
+  }, [isSuperAdmin]);
   const copyText = async (text: string, key: string) => {
     if (!text) {
       alert("There is no content to copy.");
@@ -289,108 +357,217 @@ export default function PromptManagement() {
     newLevels[index] = value;
     setMarineLevels(newLevels);
   };
-
   const savePromptVersion = async () => {
     if (!selectedPrompt || !user) return;
     setError(null);
     setIsSaving(true);
+
+    // Determine if this is a Global save or a Client Override
+    const targetClientId = isSuperAdmin ? selectedClientId : user.client_id;
+
     try {
-      const newVersion = (selectedPrompt.current_version || 1) + 1;
-
-      let versionContent = editContent;
-      // if (selectedPrompt.name === "Geography") {
-      //   versionContent = JSON.stringify(countryTemplates, null, 2);
-      // }
-      let metadataToSave = { ...(selectedPrompt.metadata || {}) };
-      await supabase.from("prompt_versions").insert({
-        prompt_template_id: selectedPrompt.id,
-        version: newVersion,
-        template_content: versionContent,
-        variables: selectedPrompt.variables,
-        edited_by: user.id,
-        change_notes: changeNotes,
-        is_active: true,
-      });
-
-      await supabase
+      // Calculate version number based on context (Global vs Client)
+      const { count } = await supabase
         .from("prompt_versions")
-        .update({ is_active: false })
+        .select("*", { count: "exact", head: true })
         .eq("prompt_template_id", selectedPrompt.id)
-        .neq("version", newVersion);
+        .filter(
+          "client_id",
+          targetClientId ? "eq" : "is",
+          targetClientId || null
+        );
 
-      const templateUpdate: any = {
-        template: editContent,
-        current_version: newVersion,
-        updated_at: new Date().toISOString(),
-        metadata: selectedPrompt.metadata || {},
-      };
+      const newVersion = (count || 0) + 1;
+      let metadataToSave = { ...(selectedPrompt.metadata || {}) };
 
-      // if (selectedPrompt.name === "Geography") {
-      //   const templatesToSave = Object.fromEntries(
-      //     Object.entries(countryTemplates).filter(
-      //       ([_, content]) => content.trim() !== ""
-      //     )
-      //   );
-      //   templateUpdate.metadata.country_templates = templatesToSave;
-      //   templateUpdate.template =
-      //     "This prompt uses country-specific templates stored in metadata.";
-      // }
-
-      // if (selectedPrompt.name === "Industry Keywords") {
-      //   templateUpdate.metadata.marine_levels = marineLevels.filter(
-      //     (level) => level.trim() !== ""
-      //   );
-      // }
       if (selectedPrompt.name === "Industry Analysis") {
-        // Only include non-empty levels
-        const nonEmptyLevels = Object.fromEntries(
+        metadataToSave.industry_levels = Object.fromEntries(
           Object.entries(industryLevels).filter(
             ([_, content]) => content.trim() !== ""
           )
         );
-        metadataToSave.industry_levels = nonEmptyLevels;
       }
+
+      // 1. Deactivate current active version for this specific context
+      const deactivateQuery = supabase
+        .from("prompt_versions")
+        .update({ is_active: false })
+        .eq("prompt_template_id", selectedPrompt.id);
+
+      if (targetClientId) deactivateQuery.eq("client_id", targetClientId);
+      else deactivateQuery.is("client_id", null);
+
+      await deactivateQuery;
+
+      // 2. Insert new version
       const { error: versionError } = await supabase
         .from("prompt_versions")
         .insert({
           prompt_template_id: selectedPrompt.id,
+          client_id: targetClientId, // This ties it to the client
           version: newVersion,
-          template_content: versionContent,
+          template_content: editContent,
           variables: selectedPrompt.variables,
           metadata: metadataToSave,
           edited_by: user.id,
-          change_notes: changeNotes,
+          change_notes: targetClientId
+            ? `[Client Override] ${changeNotes}`
+            : changeNotes,
           is_active: true,
         });
-      if (versionError) throw versionError;
-      await supabase
-        .from("prompt_versions")
-        .update({ is_active: false })
-        .eq("prompt_template_id", selectedPrompt.id)
-        .neq("version", newVersion);
 
-      const { error: templateUpdateError } = await supabase
-        .from("prompt_templates")
-        .update({
-          template: versionContent,
-          current_version: newVersion,
-          updated_at: new Date().toISOString(),
-          metadata: metadataToSave,
-        })
-        .eq("id", selectedPrompt.id);
-      if (templateUpdateError) throw templateUpdateError;
-      toast.success("New version saved successfully");
+      if (versionError) throw versionError;
+
+      // 3. Update main template ONLY if editing Global (null client)
+      if (!targetClientId) {
+        await supabase
+          .from("prompt_templates")
+          .update({
+            template: editContent,
+            current_version: newVersion,
+            updated_at: new Date().toISOString(),
+            metadata: metadataToSave,
+          })
+          .eq("id", selectedPrompt.id);
+      }
+
+      toast.success(
+        targetClientId ? "Client override saved!" : "Global version saved!"
+      );
       setIsEditing(false);
       setSelectedPrompt(null);
       await loadPrompts();
     } catch (error: any) {
       toast.error(`Save failed: ${error.message}`);
-      console.error("Error saving prompt version:", error);
       setError(`Save failed: ${error.message}`);
     } finally {
       setIsSaving(false);
     }
   };
+  // const savePromptVersion = async () => {
+  //   if (!selectedPrompt || !user) return;
+  //   setError(null);
+  //   setIsSaving(true);
+  //   const targetClientId = isSuperAdmin ? selectedClientId : user.client_id;
+  //   try {
+  //     const { count } = await supabase
+  //       .from("prompt_versions")
+  //       .select("*", { count: "exact", head: true })
+  //       .eq("prompt_template_id", selectedPrompt.id)
+  //       .filter(
+  //         "client_id",
+  //         targetClientId ? "eq" : "is",
+  //         targetClientId || null
+  //       );
+
+  //     const newVersion = (count || 0) + 1;
+
+  //     let versionContent = editContent;
+  //     // if (selectedPrompt.name === "Geography") {
+  //     //   versionContent = JSON.stringify(countryTemplates, null, 2);
+  //     // }
+  //     let metadataToSave = { ...(selectedPrompt.metadata || {}) };
+  //      if (selectedPrompt.name === "Industry Analysis") {
+  //     metadataToSave.industry_levels = Object.fromEntries(
+  //       Object.entries(industryLevels).filter(([_, content]) => content.trim() !== "")
+  //     );
+  //   }
+  //     const deactivateQuery = supabase
+  //     .from("prompt_versions")
+  //     .update({ is_active: false })
+  //     .eq("prompt_template_id", selectedPrompt.id);
+  //     if (targetClientId) deactivateQuery.eq("client_id", targetClientId);
+  //   else deactivateQuery.is("client_id", null);
+  //   await deactivateQuery;
+  //     await supabase.from("prompt_versions").insert({
+  //       prompt_template_id: selectedPrompt.id,
+  //       version: newVersion,
+  //       template_content: versionContent,
+  //       variables: selectedPrompt.variables,
+  //       edited_by: user.id,
+  //       change_notes: changeNotes,
+  //       is_active: true,
+  //     });
+
+  //     await supabase
+  //       .from("prompt_versions")
+  //       .update({ is_active: false })
+  //       .eq("prompt_template_id", selectedPrompt.id)
+  //       .neq("version", newVersion);
+
+  //     const templateUpdate: any = {
+  //       template: editContent,
+  //       current_version: newVersion,
+  //       updated_at: new Date().toISOString(),
+  //       metadata: selectedPrompt.metadata || {},
+  //     };
+
+  //     // if (selectedPrompt.name === "Geography") {
+  //     //   const templatesToSave = Object.fromEntries(
+  //     //     Object.entries(countryTemplates).filter(
+  //     //       ([_, content]) => content.trim() !== ""
+  //     //     )
+  //     //   );
+  //     //   templateUpdate.metadata.country_templates = templatesToSave;
+  //     //   templateUpdate.template =
+  //     //     "This prompt uses country-specific templates stored in metadata.";
+  //     // }
+
+  //     // if (selectedPrompt.name === "Industry Keywords") {
+  //     //   templateUpdate.metadata.marine_levels = marineLevels.filter(
+  //     //     (level) => level.trim() !== ""
+  //     //   );
+  //     // }
+  //     if (selectedPrompt.name === "Industry Analysis") {
+  //       // Only include non-empty levels
+  //       const nonEmptyLevels = Object.fromEntries(
+  //         Object.entries(industryLevels).filter(
+  //           ([_, content]) => content.trim() !== ""
+  //         )
+  //       );
+  //       metadataToSave.industry_levels = nonEmptyLevels;
+  //     }
+  //     const { error: versionError } = await supabase
+  //       .from("prompt_versions")
+  //       .insert({
+  //         prompt_template_id: selectedPrompt.id,
+  //         version: newVersion,
+  //         template_content: versionContent,
+  //         variables: selectedPrompt.variables,
+  //         metadata: metadataToSave,
+  //         edited_by: user.id,
+  //         change_notes: changeNotes,
+  //         is_active: true,
+  //       });
+  //     if (versionError) throw versionError;
+  //     await supabase
+  //       .from("prompt_versions")
+  //       .update({ is_active: false })
+  //       .eq("prompt_template_id", selectedPrompt.id)
+  //       .neq("version", newVersion);
+
+  //     const { error: templateUpdateError } = await supabase
+  //       .from("prompt_templates")
+  //       .update({
+  //         template: versionContent,
+  //         current_version: newVersion,
+  //         updated_at: new Date().toISOString(),
+  //         metadata: metadataToSave,
+  //       })
+  //       .eq("id", selectedPrompt.id);
+  //     if (templateUpdateError) throw templateUpdateError;
+  //     toast.success("New version saved successfully");
+  //     setIsEditing(false);
+  //     setSelectedPrompt(null);
+  //     await loadPrompts();
+  //   } catch (error: any) {
+  //     toast.error(`Save failed: ${error.message}`);
+  //     console.error("Error saving prompt version:", error);
+  //     setError(`Save failed: ${error.message}`);
+  //   } finally {
+  //     setIsSaving(false);
+  //   }
+  // };
   const toggleMasterTemplate = async (promptId: string, isMaster: boolean) => {
     if (!user) return;
 
@@ -647,6 +824,30 @@ export default function PromptManagement() {
         </div>
       ) : (
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+          {isSuperAdmin && !isEditing && (
+            <div className="mb-4 p-4 bg-slate-50 border border-slate-200 rounded-lg flex items-center gap-4">
+              <label className="text-sm font-semibold text-slate-700 whitespace-nowrap">
+                Editing Context:
+              </label>
+              <select
+                className="max-w-xs w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500"
+                value={selectedClientId || ""}
+                onChange={(e) => setSelectedClientId(e.target.value || null)}
+              >
+                <option value="">Global (Master Templates)</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              {selectedClientId && (
+                <span className="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-1 rounded-full border border-amber-100">
+                  Active Override Mode
+                </span>
+              )}
+            </div>
+          )}
           <table className="w-full">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
@@ -841,6 +1042,27 @@ export default function PromptManagement() {
                 <p className="text-center text-slate-500">Loading history...</p>
               ) : (
                 <div className="space-y-6">
+                   {promptVersions.length > 0 && (
+        <div className={`mb-4 px-4 py-3 rounded-lg border flex items-center gap-3 ${
+          promptVersions[0].client_id 
+            ? "bg-amber-50 border-amber-200 text-amber-800" 
+            : "bg-blue-50 border-blue-200 text-blue-800"
+        }`}>
+          <div className="p-2 bg-white rounded-md shadow-sm">
+            <History className="w-4 h-4" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold">
+              {promptVersions[0].client_id ? "Custom Client History" : "Global Master History"}
+            </p>
+            <p className="text-xs opacity-80">
+              {promptVersions[0].client_id 
+                ? "This client is using a customized override of this prompt." 
+                : "This client is currently using the global master template."}
+            </p>
+          </div>
+        </div>
+      )}
                   {promptVersions.map((version, index) => {
                     const isLatest = index === 0;
                     return (

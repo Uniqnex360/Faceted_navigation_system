@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { FolderPlus, Trash2, Eye, X } from "lucide-react";
+import { useState, useEffect, useMemo } from "react"; // 1. Added useMemo
+import { FolderPlus, Trash2, Eye, X, Download } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { FacetGenerationJob, RecommendedFacet } from "../types";
@@ -9,8 +9,13 @@ export default function ProjectManagement() {
   const { user } = useAuth();
   const toast = useToast();
   const [projects, setProjects] = useState<FacetGenerationJob[]>([]);
+  const [activeTab, setActiveTab] = useState<string>("");
+  const [availableTabs, setAvailableTabs] = useState<string[]>([]);
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
   const [projectName, setProjectName] = useState("");
+  const [selectedFacetIds, setSelectedFacetIds] = useState<Set<string>>(
+    new Set()
+  );
   const [selectedProject, setSelectedProject] =
     useState<FacetGenerationJob | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -20,33 +25,107 @@ export default function ProjectManagement() {
   );
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
+  const [columns, setColumns] = useState([
+    "Input Taxonomy",
+    "End Category (C3)",
+    "Filter Attributes",
+    "Possible Values",
+    "Filling Percentage (Approx.)",
+    "Priority (High / Medium / Low)",
+    "Confidence Score (1–10)",
+    "# of available sources",
+    "Source URLs",
+  ]);
+
   useEffect(() => {
     loadProjects();
   }, [user]);
 
+  // 2. Define filteredFacets using useMemo so it updates when tabs change
+  const filteredFacets = useMemo(() => {
+    if (!activeTab) return [];
+    return historicalFacets.filter((f: any) =>
+      f.categories?.category_path?.startsWith(activeTab)
+    );
+  }, [historicalFacets, activeTab]);
+
   const viewProjectDetails = async (project: FacetGenerationJob) => {
-  if (!project) return;
-  setSelectedProject(project);
-  setIsDetailModalOpen(true);
-  setIsLoadingDetails(true);
-  setHistoricalFacets([]);
+    if (!project) return;
+    setSelectedProject(project);
+    setIsDetailModalOpen(true);
+    setIsLoadingDetails(true);
+    setHistoricalFacets([]);
+    setSelectedFacetIds(new Set());
 
-  try {
-    const { data: facetData, error: facetError } = await supabase
-      .from("recommended_facets")
-      .select("*, categories (name)")
-      .eq("job_id", project.id)
-      .order("sort_order");
+    if (
+      project.metadata?.output_format?.columns &&
+      Array.isArray(project.metadata.output_format.columns)
+    ) {
+      setColumns(project.metadata.output_format.columns);
+    } else {
+      setColumns([
+        "Input Taxonomy",
+        "End Category (C3)",
+        "Filter Attributes",
+        "Possible Values",
+        "Filling Percentage (Approx.)",
+        "Priority (High / Medium / Low)",
+        "Confidence Score (1–10)",
+        "# of available sources",
+        "Source URLs",
+      ]);
+    }
 
-    if (facetError) throw facetError;
+    try {
+      const { data: facetData, error: facetError } = await supabase
+        .from("recommended_facets")
+        .select("*, categories (name, category_path)")
+        .eq("job_id", project.id)
+        .order("sort_order");
 
-    setHistoricalFacets((facetData as any[]) || []);
-  } catch (error) {
-    console.error("Error loading project details:", error);
-  } finally {
-    setIsLoadingDetails(false);
-  }
-};
+      if (facetError) throw facetError;
+      const facets = (facetData as any[]) || [];
+      setHistoricalFacets(facets);
+      const roots = Array.from(
+        new Set(
+          facets
+            .map((f) => f.categories?.category_path?.split(" > ")[0])
+            .filter(Boolean)
+        )
+      ).sort();
+      setAvailableTabs(roots);
+      if (roots.length > 0) setActiveTab(roots[0]);
+    } catch (error) {
+      console.error("Error loading project details:", error);
+      toast.error("Failed to load project details");
+    } finally {
+      setIsLoadingDetails(false);
+    }
+  };
+
+  const toggleFacetSelection = (id: string) => {
+    const newSet = new Set(selectedFacetIds);
+    if (newSet.has(id)) {
+      newSet.delete(id);
+    } else {
+      newSet.add(id);
+    }
+    setSelectedFacetIds(newSet);
+  };
+
+  const toggleSelectAll = () => {
+    const allFilteredSelected =
+      filteredFacets.length > 0 &&
+      filteredFacets.every((f: any) => selectedFacetIds.has(f.id));
+    const newSet = new Set(selectedFacetIds);
+    if (allFilteredSelected) {
+      filteredFacets.forEach((f: any) => newSet.delete(f.id));
+    } else {
+      filteredFacets.forEach((f: any) => newSet.add(f.id));
+    }
+    setSelectedFacetIds(newSet);
+  };
+
   const loadProjects = async () => {
     if (!user) return;
 
@@ -114,7 +193,89 @@ export default function ProjectManagement() {
         await loadProjects();
       }
     });
+  };
 
+  const exportFacetsFromModal = () => {
+    const dataToExport =
+      selectedFacetIds.size > 0
+        ? historicalFacets.filter((f: any) => selectedFacetIds.has(f.id))
+        : historicalFacets;
+    if (dataToExport.length === 0) return;
+
+    const csvRows = [
+      columns.join(","),
+      ...dataToExport.map((f: any) => {
+        const categoryPath = f.categories?.category_path || "N/A";
+        const categoryName = f.categories?.name || "Unknown";
+
+        const inputTaxonomy =
+          f["Input Taxonomy"] || f["A. Input Taxonomy"] || categoryPath;
+        const endCategory =
+          f["End Category (C3)"] || f["B. End Category (C3)"] || categoryName;
+        const filterAttributes =
+          f.facet_name ||
+          f["Filter Attributes"] ||
+          f["C. Filter Attributes"] ||
+          "";
+        const possibleValues =
+          f.possible_values ||
+          f["Possible Values"] ||
+          f["D. Possible Values"] ||
+          "";
+        const fillingPercentage =
+          f.filling_percentage ||
+          f["Filling Percentage (Approx.)"] ||
+          f["E. Filling Percentage (Approx.)"] ||
+          0;
+        const priority =
+          f.priority ||
+          f["Priority (High / Medium / Low)"] ||
+          f["F. Priority (High / Medium / Low)"] ||
+          "Medium";
+        const confidenceScore =
+          f.confidence_score ||
+          f["Confidence Score (1–10)"] ||
+          f["G. Confidence Score (1–10)"] ||
+          5;
+        const numSources =
+          f.num_sources ||
+          f["# of available sources"] ||
+          f["H. # of available sources"] ||
+          0;
+        const sourceUrls =
+          f.source_urls || f["Source URLs"] || f["I. Source URLs"] || "N/A";
+
+        const safe = (str: any) => `"${String(str || "").replace(/"/g, '""')}"`;
+
+        return [
+          safe(inputTaxonomy),
+          safe(endCategory),
+          safe(filterAttributes),
+          safe(possibleValues),
+          fillingPercentage,
+          priority,
+          confidenceScore,
+          numSources,
+          safe(sourceUrls),
+        ].join(",");
+      }),
+    ];
+
+    const csv = csvRows.join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${
+      selectedProject?.project_name || "project"
+    }_facets_export.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success(
+      selectedFacetIds.size > 0
+        ? "Exported selected facets"
+        : "Exported all facets"
+    );
   };
 
   const getStatusColor = (status: string) => {
@@ -263,107 +424,224 @@ export default function ProjectManagement() {
 
       {isDetailModalOpen && selectedProject && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] flex flex-col">
+          <div className="bg-white rounded-lg max-w-[95vw] w-full max-h-[90vh] flex flex-col">
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-10">
-              <h3 className="text-xl font-semibold text-slate-900">
-                {/* Project Details:{" "}
-                {selectedProject.project_name || "Untitled Project"} */}
-              </h3>
-              <button
-                onClick={() => setIsDetailModalOpen(false)}
-                className="p-2 hover:bg-slate-100 rounded-full"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div>
+                <h3 className="text-xl font-semibold text-slate-900">
+                  {activeTab
+                    ? activeTab
+                    : selectedProject.category_ids &&
+                      selectedProject.category_ids.length > 0
+                    ? selectedProject.category_ids
+                        .map((id) => categoryMap[id])
+                        .filter(Boolean)
+                        .slice(0, 3)
+                        .join(", ") +
+                      (selectedProject.category_ids.length > 3
+                        ? ` + ${selectedProject.category_ids.length - 3} more`
+                        : "")
+                    : selectedProject.project_name || "Untitled Project"}
+                </h3>
+                <p className="text-sm text-slate-500">
+                  {selectedFacetIds.size > 0
+                    ? `${selectedFacetIds.size} selected`
+                    : `Showing ${filteredFacets.length} facets`}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={exportFacetsFromModal}
+                  disabled={historicalFacets.length === 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  {selectedFacetIds.size > 0
+                    ? `Export Selected (${selectedFacetIds.size})`
+                    : "Download CSV"}
+                </button>
+                <button
+                  onClick={() => setIsDetailModalOpen(false)}
+                  className="p-2 hover:bg-slate-100 rounded-full text-slate-500"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
             </div>
 
-            <div className="p-6 overflow-y-auto">
+            <div className="p-0 overflow-hidden flex-1 flex flex-col">
               {isLoadingDetails ? (
-                <div className="text-center py-12">
-                  <p className="text-slate-500">Loading project history...</p>
+                <div className="text-center py-20">
+                  <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
+                  <p className="text-slate-500">Loading...</p>
                 </div>
               ) : (
-                <div className="space-y-8">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm font-medium text-slate-500">
-                        Status
-                      </p>
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
-                          selectedProject.status
-                        )}`}
-                      >
-                        {selectedProject.status}
-                      </span>
+                <div className="flex-1 overflow-auto flex flex-col">
+                  {availableTabs.length > 0 && (
+                    <div className="px-6 pt-4 border-b border-slate-200 bg-white sticky top-0 z-20">
+                      <div className="flex gap-6 overflow-x-auto">
+                        {availableTabs.map((tab) => (
+                          <button
+                            key={tab}
+                            onClick={() => setActiveTab(tab)}
+                            className={`pb-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                              activeTab === tab
+                                ? "border-blue-600 text-blue-600"
+                                : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+                            }`}
+                          >
+                            {tab}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-slate-500">
-                        Created
-                      </p>
-                      <p className="text-slate-800">
-                        {new Date(
-                          selectedProject.created_at
-                        ).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
+                  )}
 
-                  <div>
-                    <h4 className="text-lg font-semibold text-slate-900 mb-4">
-                      Generated Facet History
-                    </h4>
-                    {historicalFacets.length > 0 ? (
-                      <div className="border border-slate-200 rounded-lg overflow-hidden">
-                        <table className="w-full">
-                          <thead className="bg-slate-50">
-                            <tr>
-                              <th className="px-4 py-2 text-left text-sm font-semibold text-slate-600">
-                                Category
-                              </th>
-                              <th className="px-4 py-2 text-left text-sm font-semibold text-slate-600">
-                                Facet Name
-                              </th>
-                              <th className="px-4 py-2 text-left text-sm font-semibold text-slate-600">
-                                Priority
-                              </th>
+                  {filteredFacets.length > 0 ? (
+                    <table className="w-full text-left border-collapse">
+                      <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
+                        <tr>
+                          {/* 4. Added missing TD checkbox cell */}
+                          <th className="px-4 py-3 w-10 border-b border-slate-200 bg-slate-50">
+                            <input
+                              type="checkbox"
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                              checked={
+                                filteredFacets.length > 0 &&
+                                filteredFacets.every((f: any) =>
+                                  selectedFacetIds.has(f.id)
+                                )
+                              }
+                              onChange={toggleSelectAll}
+                            />
+                          </th>
+                          {columns.map((col, idx) => (
+                            <th
+                              key={idx}
+                              className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 whitespace-nowrap bg-slate-50"
+                            >
+                              {col}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 bg-white">
+                        {filteredFacets.map((facet: any) => {
+                          const categoryPath =
+                            facet.categories?.category_path || "N/A";
+                          const categoryName =
+                            facet.categories?.name || "Unknown";
+
+                          return (
+                            <tr key={facet.id} className="hover:bg-slate-50">
+                              {/* 5. Added missing TD for checkbox */}
+                              <td className="px-4 py-4">
+                                <input
+                                  type="checkbox"
+                                  className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                  checked={selectedFacetIds.has(facet.id)}
+                                  onChange={() =>
+                                    toggleFacetSelection(facet.id)
+                                  }
+                                />
+                              </td>
+
+                              <td
+                                className="px-6 py-4 text-sm text-slate-600 max-w-xs truncate"
+                                title={categoryPath}
+                              >
+                                {facet["Input Taxonomy"] ||
+                                  facet["A. Input Taxonomy"] ||
+                                  categoryPath}
+                              </td>
+                              <td className="px-6 py-4 text-sm text-slate-600">
+                                {facet["End Category (C3)"] ||
+                                  facet["B. End Category (C3)"] ||
+                                  categoryName}
+                              </td>
+                              <td className="px-6 py-4 text-sm font-medium text-slate-900">
+                                {facet.facet_name ||
+                                  facet["Filter Attributes"] ||
+                                  facet["C. Filter Attributes"] ||
+                                  "N/A"}
+                              </td>
+                              <td
+                                className="px-6 py-4 text-sm text-slate-600 max-w-md truncate"
+                                title={facet.possible_values}
+                              >
+                                {facet.possible_values ||
+                                  facet["Possible Values"] ||
+                                  facet["D. Possible Values"] ||
+                                  "N/A"}
+                              </td>
+                              <td className="px-6 py-4 text-sm text-slate-600">
+                                {facet.filling_percentage ||
+                                  facet["Filling Percentage (Approx.)"] ||
+                                  facet["E. Filling Percentage (Approx.)"] ||
+                                  0}
+                                %
+                              </td>
+                              <td className="px-6 py-4">
+                                <span
+                                  className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                    (facet.priority ||
+                                      facet["Priority (High / Medium / Low)"] ||
+                                      facet[
+                                        "F. Priority (High / Medium / Low)"
+                                      ]) === "High"
+                                      ? "bg-red-100 text-red-700"
+                                      : (facet.priority ||
+                                          facet[
+                                            "Priority (High / Medium / Low)"
+                                          ] ||
+                                          facet[
+                                            "F. Priority (High / Medium / Low)"
+                                          ]) === "Medium"
+                                      ? "bg-yellow-100 text-yellow-700"
+                                      : "bg-green-100 text-green-700"
+                                  }`}
+                                >
+                                  {facet.priority ||
+                                    facet["Priority (High / Medium / Low)"] ||
+                                    facet[
+                                      "F. Priority (High / Medium / Low)"
+                                    ] ||
+                                    "Medium"}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-sm text-slate-600">
+                                {facet.confidence_score ||
+                                  facet["Confidence Score (1–10)"] ||
+                                  facet["G. Confidence Score (1–10)"] ||
+                                  5}
+                                /10
+                              </td>
+                              <td className="px-6 py-4 text-sm text-slate-600">
+                                {facet.num_sources ||
+                                  facet["# of available sources"] ||
+                                  facet["H. # of available sources"] ||
+                                  0}
+                              </td>
+                              <td
+                                className="px-6 py-4 text-sm text-slate-600 max-w-xs truncate"
+                                title={facet.source_urls}
+                              >
+                                {facet.source_urls ||
+                                  facet["Source URLs"] ||
+                                  facet["I. Source URLs"] ||
+                                  "N/A"}
+                              </td>
                             </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-200">
-                            {historicalFacets.map((facet) => (
-                              <tr key={facet.id}>
-                                <td className="px-4 py-2 text-sm text-slate-500">
-                                  {facet.categories?.name || "N/A"}
-                                </td>
-                                <td className="px-4 py-2 text-sm font-medium text-slate-800">
-                                  {facet.facet_name}
-                                </td>
-                                <td className="px-4 py-2 text-sm">
-                                  <span
-                                    className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                      facet.priority === "High"
-                                        ? "bg-red-100 text-red-700"
-                                        : facet.priority === "Medium"
-                                        ? "bg-yellow-100 text-yellow-700"
-                                        : "bg-green-100 text-green-700"
-                                    }`}
-                                  >
-                                    {facet.priority}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <div className="text-center py-8 border-2 border-dashed border-slate-200 rounded-lg">
-                        <p className="text-slate-500">
-                          No facets have been generated for this project yet.
-                        </p>
-                      </div>
-                    )}
-                  </div>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="text-center py-20">
+                      <p className="text-slate-500">
+                        No facets found for this category.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

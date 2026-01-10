@@ -42,8 +42,7 @@ interface DashboardStats {
   downloads: number;
   total_projects: number;
   total_users?: number;
-  total_admins?: number;
-  total_clients?: number;
+  total_active_clients?: number; 
   queue_count: number;
 }
 
@@ -85,7 +84,7 @@ export default function Dashboard() {
     }
   }, [user]);
 
-  const loadDashboardStats = async () => {
+    const loadDashboardStats = async () => {
     if (!user) return;
 
     const clientFilter =
@@ -96,7 +95,7 @@ export default function Dashboard() {
       categoriesData,
       exportsData,
       projectsData,
-      usersData,
+      adminSpecificData, 
       queueData,
     ] = await Promise.all([
       supabase
@@ -106,33 +105,28 @@ export default function Dashboard() {
       supabase.from("categories").select("id").match(clientFilter),
       supabase.from("export_history").select("id").match(clientFilter),
       supabase.from("facet_generation_jobs").select("id").match(clientFilter),
-      user.role === "client_admin"
-        ? supabase
-            .from("user_profiles")
-            .select("role")
-            .eq("client_id", user.client_id)
-        : Promise.resolve({ data: [] }),
+      
+      user.role === "super_admin"
+        ? supabase.from("clients").select("id") 
+        : user.role === "client_admin"
+        ? supabase.from("user_profiles").select("id").eq("client_id", user.client_id) 
+        : Promise.resolve({ data: [] }), 
       supabase
         .from("user_queues")
         .select("queue")
         .eq("user_id", user.id)
         .maybeSingle(),
     ]);
-    console.log("Users Data:", usersData);
-    console.log("Users:", usersData.data);
+
     const jobs = jobsData.data || [];
     const completed = jobs.filter((j) => j.status === "completed").length;
     const inProgress = jobs.filter((j) => j.status === "processing").length;
     const pending = jobs.filter((j) => j.status === "pending").length;
-    const users = usersData.data || [];
-    const totalAdmins = users.filter((u) => u.role === "client_admin").length;
-    const totalClients = users.filter((u) => u.role === "client_user").length;
     const queueCount = (queueData.data?.queue as any[])?.length || 0;
-    console.log("Total users found:", users.length);
-    console.log(
-      "User roles:",
-      users.map((u) => u.role)
-    );
+
+    const totalClients = user.role === "super_admin" ? (adminSpecificData.data?.length || 0) : 0;
+    const totalTeamMembers = user.role === "client_admin" ? (adminSpecificData.data?.length || 0) : 0;
+
     setStats({
       facets_recommended: completed,
       jobs_in_progress: inProgress,
@@ -140,9 +134,8 @@ export default function Dashboard() {
       pending_categories: categoriesData.data?.length || 0,
       downloads: exportsData.data?.length || 0,
       total_projects: projectsData.data?.length || 0,
-      total_users: users.length,
-      total_admins: totalAdmins,
-      total_clients: totalClients,
+      total_users: totalTeamMembers,
+      total_active_clients: totalClients,
       queue_count: queueCount,
     });
   };
@@ -249,31 +242,34 @@ export default function Dashboard() {
                 <p className="text-sm text-slate-600">Pending jobs</p>
               </div>
 
-              {/* Total Users - goes to Clients (super_admin only) */}
-              {user?.role === "super_admin" && (
+              {(user?.role === "super_admin" || user?.role === "client_admin") && (
                 <div
                   onClick={() => navigateTo("clients")}
                   className="bg-white p-6 rounded-lg border border-slate-200 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"
                 >
                   <div className="flex items-center justify-between mb-4">
-                    <div className="p-3 bg-teal-100 rounded-lg">
-                      <Users className="w-6 h-6 text-teal-600" />
+                    <div className={`p-3 rounded-lg ${user.role === 'super_admin' ? 'bg-teal-100' : 'bg-purple-100'}`}>
+                      {user.role === 'super_admin' ? (
+                        <Building2 className="w-6 h-6 text-teal-600" />
+                      ) : (
+                        <Users className="w-6 h-6 text-purple-600" />
+                      )}
                     </div>
                     <span className="text-3xl font-bold text-slate-900">
-                      {stats.total_users || 0}
+                      {user.role === 'super_admin' 
+                        ? stats.total_active_clients 
+                        : stats.total_users}
                     </span>
                   </div>
                   <h3 className="font-semibold text-slate-900 mb-1">
-                    Total Users
+                    {user.role === 'super_admin' ? "Total Clients" : "Team Members"}
                   </h3>
-                  <div className="text-sm text-slate-600 space-y-1">
-                    <p>Admins: {stats.total_admins || 0}</p>
-                    <p>Users: {stats.total_clients || 0}</p>
-                  </div>
+                  <p className="text-sm text-slate-600">
+                    {user.role === 'super_admin' ? "Active companies" : "Managed users"}
+                  </p>
                 </div>
               )}
 
-              {/* Categories - goes to Upload */}
               <div
                 onClick={() => navigateTo("upload")}
                 className="bg-white p-6 rounded-lg border border-slate-200 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"

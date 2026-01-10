@@ -44,7 +44,7 @@ export default function ExportView({ project }: ExportViewProps) {
       'Priority (High / Medium / Low)',
       'Confidence Score (1-10)',
       '# of available sources',
-      'List the sources URL',
+      'Sources URLs',
     ];
 
     const rows = facets.map((facet) => [
@@ -101,7 +101,7 @@ export default function ExportView({ project }: ExportViewProps) {
       'Priority (High / Medium / Low)',
       'Confidence Score (1-10)',
       '# of available sources',
-      'List the sources URL',
+      'Sources URLs',
     ];
 
     const rows = facets.map((facet) => [
