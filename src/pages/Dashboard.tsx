@@ -28,6 +28,7 @@ type View =
   | "upload"
   | "prompts"
   | "generate"
+  |'categories-list'
   | "clients";
 interface Client {
   id: string;
@@ -42,7 +43,7 @@ interface DashboardStats {
   downloads: number;
   total_projects: number;
   total_users?: number;
-  total_active_clients?: number; 
+  total_active_clients?: number;
   queue_count: number;
 }
 
@@ -84,7 +85,7 @@ export default function Dashboard() {
     }
   }, [user]);
 
-    const loadDashboardStats = async () => {
+  const loadDashboardStats = async () => {
     if (!user) return;
 
     const clientFilter =
@@ -95,7 +96,7 @@ export default function Dashboard() {
       categoriesData,
       exportsData,
       projectsData,
-      adminSpecificData, 
+      adminSpecificData,
       queueData,
     ] = await Promise.all([
       supabase
@@ -105,12 +106,15 @@ export default function Dashboard() {
       supabase.from("categories").select("id").match(clientFilter),
       supabase.from("export_history").select("id").match(clientFilter),
       supabase.from("facet_generation_jobs").select("id").match(clientFilter),
-      
+
       user.role === "super_admin"
-        ? supabase.from("clients").select("id") 
+        ? supabase.from("clients").select("id")
         : user.role === "client_admin"
-        ? supabase.from("user_profiles").select("id").eq("client_id", user.client_id) 
-        : Promise.resolve({ data: [] }), 
+        ? supabase
+            .from("user_profiles")
+            .select("id")
+            .eq("client_id", user.client_id)
+        : Promise.resolve({ data: [] }),
       supabase
         .from("user_queues")
         .select("queue")
@@ -124,8 +128,10 @@ export default function Dashboard() {
     const pending = jobs.filter((j) => j.status === "pending").length;
     const queueCount = (queueData.data?.queue as any[])?.length || 0;
 
-    const totalClients = user.role === "super_admin" ? (adminSpecificData.data?.length || 0) : 0;
-    const totalTeamMembers = user.role === "client_admin" ? (adminSpecificData.data?.length || 0) : 0;
+    const totalClients =
+      user.role === "super_admin" ? adminSpecificData.data?.length || 0 : 0;
+    const totalTeamMembers =
+      user.role === "client_admin" ? adminSpecificData.data?.length || 0 : 0;
 
     setStats({
       facets_recommended: completed,
@@ -196,7 +202,7 @@ export default function Dashboard() {
               </div>
 
               {/* In Progress - goes to Generate */}
-               <div
+              <div
                 onClick={() => navigateTo("generate")}
                 className="bg-white p-6 rounded-lg border border-slate-200 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"
               >
@@ -216,9 +222,9 @@ export default function Dashboard() {
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <span>Processing</span>
                   {stats.queue_count > 0 && (
-                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                       + {stats.queue_count} in queue
-                     </span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                      + {stats.queue_count} in queue
+                    </span>
                   )}
                 </div>
               </div>
@@ -242,36 +248,47 @@ export default function Dashboard() {
                 <p className="text-sm text-slate-600">Pending jobs</p>
               </div>
 
-              {(user?.role === "super_admin" || user?.role === "client_admin") && (
+              {(user?.role === "super_admin" ||
+                user?.role === "client_admin") && (
                 <div
                   onClick={() => navigateTo("clients")}
                   className="bg-white p-6 rounded-lg border border-slate-200 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"
                 >
                   <div className="flex items-center justify-between mb-4">
-                    <div className={`p-3 rounded-lg ${user.role === 'super_admin' ? 'bg-teal-100' : 'bg-purple-100'}`}>
-                      {user.role === 'super_admin' ? (
+                    <div
+                      className={`p-3 rounded-lg ${
+                        user.role === "super_admin"
+                          ? "bg-teal-100"
+                          : "bg-purple-100"
+                      }`}
+                    >
+                      {user.role === "super_admin" ? (
                         <Building2 className="w-6 h-6 text-teal-600" />
                       ) : (
                         <Users className="w-6 h-6 text-purple-600" />
                       )}
                     </div>
                     <span className="text-3xl font-bold text-slate-900">
-                      {user.role === 'super_admin' 
-                        ? stats.total_active_clients 
+                      {user.role === "super_admin"
+                        ? stats.total_active_clients
                         : stats.total_users}
                     </span>
                   </div>
                   <h3 className="font-semibold text-slate-900 mb-1">
-                    {user.role === 'super_admin' ? "Total Clients" : "Team Members"}
+                    {user.role === "super_admin"
+                      ? "Total Clients"
+                      : "Team Members"}
                   </h3>
                   <p className="text-sm text-slate-600">
-                    {user.role === 'super_admin' ? "Active companies" : "Managed users"}
+                    {user.role === "super_admin"
+                      ? "Active companies"
+                      : "Managed users"}
                   </p>
                 </div>
               )}
 
               <div
-                onClick={() => navigateTo("upload")}
+                onClick={() => navigateTo("categories-list")}
                 className="bg-white p-6 rounded-lg border border-slate-200 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"
               >
                 <div className="flex items-center justify-between mb-4">
@@ -288,7 +305,6 @@ export default function Dashboard() {
                 <p className="text-sm text-slate-600">Total uploaded</p>
               </div>
 
-              {/* Downloads - goes to Projects */}
               <div
                 onClick={() => navigateTo("projects")}
                 className="bg-white p-6 rounded-lg border border-slate-200 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"
@@ -360,6 +376,8 @@ export default function Dashboard() {
         return <CategoryUpload />;
       case "prompts":
         return <PromptManagement />;
+      case 'categories-list':
+        return <CategoryUpload initialTab='all'/>
       case "generate":
         return (
           <FacetGeneration onComplete={() => setCurrentView("dashboard")} />
@@ -380,6 +398,14 @@ export default function Dashboard() {
           <h1 className="text-xl font-bold text-slate-900">
             Facet Builder Pro
           </h1>
+          {user?.role !== "super_admin" && client && (
+            <div className="flex items-center gap-2 mt-2 px-2 py-1 bg-slate-100 rounded text-xs">
+              <Building2 className="w-3 h-3 text-slate-500" />
+              <span className="text-slate-700 font-medium truncate">
+                {client.name || client.company_name || "Unknown client"}
+              </span>
+            </div>
+          )}
           <p className="text-sm text-slate-600 mt-1 truncate">{user?.email}</p>
           {user?.role === "super_admin" && (
             <span className="inline-block mt-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs font-medium rounded">
@@ -391,14 +417,7 @@ export default function Dashboard() {
               Admin
             </span>
           )}
-          {user?.role !== "super_admin" && client && (
-            <div className="flex items-center gap-2 mt-2 px-2 py-1 bg-slate-100 rounded text-xs">
-              <Building2 className="w-3 h-3 text-slate-500" />
-              <span className="text-slate-700 font-medium truncate">
-                {client.name || client.company_name || "Unknown client"}
-              </span>
-            </div>
-          )}
+          
         </div>
 
         <nav className="p-4 flex-1 overflow-y-auto">

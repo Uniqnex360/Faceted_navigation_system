@@ -95,11 +95,11 @@ import { Category } from "../types/index.ts";
 type SortField = "name" | "category_path" | "level" | "created_at";
 type SortDirection = "asc" | "desc";
 
-export default function CategoryUpload() {
+export default function CategoryUpload({initialTab='file'}:{initialTab?:'file'|'manual'|'all'}) {
   const { user } = useAuth();
   const toast = useToast();
 
-  const [activeTab, setActiveTab] = useState<"file" | "manual" | "all">("file");
+  const [activeTab, setActiveTab] = useState<"file" | "manual" | "all">(initialTab);
   const [selections, setSelections] = useState<{ [key: number]: string }>({
     1: "",
     2: "",
@@ -237,7 +237,9 @@ export default function CategoryUpload() {
       <ChevronDown className="w-3 h-3 text-blue-600" />
     );
   };
-
+  useEffect(()=>{
+    setActiveTab(initialTab)
+  },[initialTab])
   // Export Functions
   const prepareExportData = () => {
     return processedCategories.map((cat) => ({

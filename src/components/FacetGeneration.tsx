@@ -85,8 +85,6 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
     loadData();
   }, [user, onComplete]);
 
-  // --- Handlers ---
-
   const toggleFacetForExport = (categoryId: string, facetId: string) => {
     setSelectedFacetsForExport((prev) => {
       const newSelections = { ...prev };
@@ -373,7 +371,8 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
 
   const loadData = async () => {
     if (!user) return;
-    const clientFilter =user.role === "super_admin" ? {} : { client_id: user.client_id };
+    const clientFilter =
+      user.role === "super_admin" ? {} : { client_id: user.client_id };
     const [categoriesData, promptsData] = await Promise.all([
       supabase
         .from("categories")
@@ -388,34 +387,35 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
         .eq("is_active", true)
         .order("execution_order"),
     ]);
-     let basePrompts = (promptsData.data as PromptTemplate[]) || [];
+    let basePrompts = (promptsData.data as PromptTemplate[]) || [];
 
-  // 3. PRODUCTION CRITICAL: Fetch Client-Specific Overrides
-  // We look for active versions tied to this user's client_id
-  if (user.client_id) {
-    const { data: overrides } = await supabase
-      .from("prompt_versions")
-      .select("*")
-      .eq("client_id", user.client_id)
-      .eq("is_active", true);
+    if (user.client_id) {
+      const { data: overrides } = await supabase
+        .from("prompt_versions")
+        .select("*")
+        .eq("client_id", user.client_id)
+        .eq("is_active", true);
 
-    if (overrides && overrides.length > 0) {
-      basePrompts = basePrompts.map((base) => {
-        const override = overrides.find((o) => o.prompt_template_id === base.id);
-        if (override) {
-          return {
-            ...base,
-            template: override.template_content,
-            metadata: override.metadata || base.metadata,
-            current_version: override.version,
-            is_override: true, // Label for internal logic
-          };
-        }
-        return base;
-      });
+      if (overrides && overrides.length > 0) {
+        basePrompts = basePrompts.map((base) => {
+          const override = overrides.find(
+            (o) => o.prompt_template_id === base.id
+          );
+          if (override) {
+            return {
+              ...base,
+              template: override.template_content,
+              metadata: override.metadata || base.metadata,
+              current_version: override.version,
+              is_override: true,
+            };
+          }
+          return base;
+        });
+      }
     }
-  }
-    const sortedPrompts = basePrompts.sort((a, b) => {
+    const validPrompts=basePrompts.filter(p=>p.template && p.template.trim().length>0)
+    const sortedPrompts = validPrompts.sort((a, b) => {
       const indexA = PROMPT_EXECUTION_ORDER.indexOf(a.name);
       const indexB = PROMPT_EXECUTION_ORDER.indexOf(b.name);
       const finalIndexA = indexA === -1 ? Infinity : indexA;
@@ -462,9 +462,12 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
   };
 
   const selectAllPrompts = () => {
-    if (selectedPrompts.size === prompts.length) setSelectedPrompts(new Set());
-    else setSelectedPrompts(new Set(prompts.map((p) => p.id)));
-  };
+  if (selectedPrompts.size === prompts.length) {
+    setSelectedPrompts(new Set());
+  } else {
+    setSelectedPrompts(new Set(prompts.map((p) => p.id)));
+  }
+};
 
   const checkForDuplicateJob = async () => {
     if (!user) return null;
@@ -1415,7 +1418,9 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
             </div>
           )}
           <div className="max-h-96 overflow-y-auto space-y-2">
-            {prompts.map((prompt) => (
+            {prompts.length>0 ? (
+
+            prompts.map((prompt) => (
               <div
                 key={prompt.id}
                 className="p-3 hover:bg-slate-50 rounded-lg transition-colors"
@@ -1439,7 +1444,13 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
                   </div>
                 </button>
               </div>
-            ))}
+            ))
+            ):(
+              <div className="p-8 text-center border-2 border-dashed border-slate-100 rounded-1">
+                <Settings className="w-8 h-8 text-slate-200 mx-auto mb-2"/>
+                <p className="text-sm text-slate-400">No active prompt templates available</p>
+              </div>
+            )}
           </div>
         </div>
       </div>

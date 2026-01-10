@@ -297,7 +297,7 @@ export default function ProjectManagement() {
         Project Management
       </h2>
 
-      <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
+      {/* <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
         <h3 className="font-semibold text-slate-900 mb-4">
           Create New Project
         </h3>
@@ -318,7 +318,7 @@ export default function ProjectManagement() {
             Create Project
           </button>
         </div>
-      </div>
+      </div> */}
 
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         <table className="w-full">
