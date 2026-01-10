@@ -8,6 +8,7 @@ import {
   Copy,
   X,
   RotateCcw,
+  Trash2,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -346,6 +347,27 @@ export default function PromptManagement() {
       [level]: content,
     }));
   };
+  const deletePrompt=async(promptId:string)=>{
+    if(user?.role!=='super_admin')return 
+    toast.confirm(`Are you sure you want to delete the prompt?.This action cannot be undone!`,
+      async()=>{
+        try {
+          const {error:templateError}=await supabase.from('prompt_templates').delete().eq('id',promptId)
+          if(templateError)
+          {
+            throw templateError
+          }
+          await supabase.from('prompt_verions').delete().eq('prompt_template_id',promptId)
+          toast.success("Prompt has been deleted!")
+          await loadPrompts()
+        } catch (error:any) {
+          console.error("Failed to delete the prompt",error)
+          toast.error(`Delete failed :${error.message}`)
+        }
+      },
+      {confirmText:"Delete",cancelText:"Cancel"}
+    )
+  }
   const handleCountryTemplateChange = (country: string, value: string) => {
     setCountryTemplates((prev) => ({
       ...prev,
@@ -882,14 +904,12 @@ export default function PromptManagement() {
                     v{prompt.current_version || 1}
                   </td>
 
-                  {/* Corrected Master Template Column */}
                   <td className="px-6 py-4">
                     <button
                       onClick={async () => {
                         const isMaster = await checkIsMaster(prompt.id);
                         toggleMasterTemplate(prompt.id, isMaster);
                       }}
-                      // Disable the button for non-admins
                       disabled={!isSuperAdmin}
                       className="text-yellow-500 hover:text-yellow-600 disabled:text-slate-300 disabled:cursor-not-allowed"
                       title="Toggle Master Template"
@@ -898,7 +918,6 @@ export default function PromptManagement() {
                     </button>
                   </td>
 
-                  {/* Corrected Actions Column */}
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       {isSuperAdmin && (
@@ -917,6 +936,13 @@ export default function PromptManagement() {
                       >
                         <History className="w-4 h-4" />
                       </button>
+                      {isSuperAdmin && (
+                        <button onClick={()=>deletePrompt(prompt.id)}
+                        className="p-1 text-red-600 hover:bg-red-50 rounded"
+                         title={selectedClientId ? "Delete Client Override" : "Delete Global Prompt"}>
+                          <Trash2 className='w-4 h-4'/>
+                         </button>
+                      )}
                     </div>
                   </td>
                 </tr>
