@@ -369,10 +369,79 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
     0
   );
 
+  //   const loadData = async () => {
+  //     if (!user) return;
+  //     const clientFilter =
+  //       user.role === "super_admin" ? {} : { client_id: user.client_id };
+  //     const [categoriesData, promptsData] = await Promise.all([
+  //       supabase
+  //         .from("categories")
+  //         .select("*")
+  //         .eq("is_visible", true)
+  //         .match(clientFilter)
+  //         .order("category_path"),
+  //       supabase
+  //         .from("prompt_templates")
+  //         .select("*")
+  //         .order("level")
+  //         .eq("is_active", true)
+  //         .order("execution_order"),
+  //     ]);
+  //     let basePrompts = (promptsData.data as PromptTemplate[]) || [];
+
+  //     if (user.client_id) {
+  //       const { data: overrides } = await supabase
+  //         .from("prompt_versions")
+  //         .select("*")
+  //         .eq("client_id", user.client_id)
+  //         .eq("is_active", true);
+
+  //       if (overrides && overrides.length > 0) {
+  //         basePrompts = basePrompts.map((base) => {
+  //           const override = overrides.find(
+  //             (o) => o.prompt_template_id === base.id
+  //           );
+  //           if (override) {
+  //             return {
+  //               ...base,
+  //               template: override.template_content,
+  //               metadata: override.metadata || base.metadata,
+  //               current_version: override.version,
+  //               is_override: true,
+  //             };
+  //           }
+  //           return base;
+  //         });
+  //       }
+  //     }
+  //     const validPrompts=basePrompts.filter(p=>p.template && p.template.trim().length>0)
+  //     const sortedPrompts = validPrompts.sort((a, b) => {
+  //       const indexA = PROMPT_EXECUTION_ORDER.indexOf(a.name);
+  //       const indexB = PROMPT_EXECUTION_ORDER.indexOf(b.name);
+  //       const finalIndexA = indexA === -1 ? Infinity : indexA;
+  //       const finalIndexB = indexB === -1 ? Infinity : indexB;
+  //       return finalIndexA - finalIndexB;
+  //     });
+  //     setCategories((categoriesData.data as Category[]) || []);
+  //     setPrompts(sortedPrompts);
+  //     const targetPrompts = ["Industry Analysis", "Master Prompt"];
+  //     const defaultSelectedIds = sortedPrompts
+  //   .filter((p) => targetPrompts.includes(p.name))
+  //   .map((p) => p.id);
+  // setSelectedPrompts(new Set(defaultSelectedIds));
+  //   };
   const loadData = async () => {
     if (!user) return;
+
+    // PRODUCTION FIX: Handle Super Admin impersonation context
+    // Use selectedClientId if Super Admin, otherwise user's own client_id
+    const activeClientId =
+      user.role === "super_admin"
+        ? (window as any).selectedClientId
+        : user.client_id;
     const clientFilter =
       user.role === "super_admin" ? {} : { client_id: user.client_id };
+
     const [categoriesData, promptsData] = await Promise.all([
       supabase
         .from("categories")
@@ -380,20 +449,17 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
         .eq("is_visible", true)
         .match(clientFilter)
         .order("category_path"),
-      supabase
-        .from("prompt_templates")
-        .select("*")
-        .order("level")
-        .eq("is_active", true)
-        .order("execution_order"),
+      supabase.from("prompt_templates").select("*").eq("is_active", true),
     ]);
+
     let basePrompts = (promptsData.data as PromptTemplate[]) || [];
 
-    if (user.client_id) {
+    // Apply Overrides using activeClientId
+    if (activeClientId) {
       const { data: overrides } = await supabase
         .from("prompt_versions")
         .select("*")
-        .eq("client_id", user.client_id)
+        .eq("client_id", activeClientId)
         .eq("is_active", true);
 
       if (overrides && overrides.length > 0) {
@@ -401,36 +467,40 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
           const override = overrides.find(
             (o) => o.prompt_template_id === base.id
           );
-          if (override) {
-            return {
-              ...base,
-              template: override.template_content,
-              metadata: override.metadata || base.metadata,
-              current_version: override.version,
-              is_override: true,
-            };
-          }
-          return base;
+          return override
+            ? {
+                ...base,
+                template: override.template_content,
+                metadata: override.metadata || base.metadata,
+                current_version: override.version,
+                is_override: true,
+              }
+            : base;
         });
       }
     }
-    const validPrompts=basePrompts.filter(p=>p.template && p.template.trim().length>0)
+
+    const validPrompts = basePrompts.filter((p) => {
+      const hasTemplate = p.template && p.template.trim().length > 0;
+      if (p.name === "Industry Analysis") {
+        const levels = (p.metadata as any)?.industry_levels;
+        return hasTemplate && levels && Object.keys(levels).length > 0;
+      }
+      return hasTemplate;
+    });
+
     const sortedPrompts = validPrompts.sort((a, b) => {
       const indexA = PROMPT_EXECUTION_ORDER.indexOf(a.name);
       const indexB = PROMPT_EXECUTION_ORDER.indexOf(b.name);
-      const finalIndexA = indexA === -1 ? Infinity : indexA;
-      const finalIndexB = indexB === -1 ? Infinity : indexB;
-      return finalIndexA - finalIndexB;
+      return (indexA === -1 ? 99 : indexA) - (indexB === -1 ? 99 : indexB);
     });
+
     setCategories((categoriesData.data as Category[]) || []);
     setPrompts(sortedPrompts);
-    const targetPrompts = ["Industry Analysis", "Master Prompt"];
-    const defaultSelectedIds = sortedPrompts
-      .filter((p) => targetPrompts.includes(p.name))
-      .map((p) => p.id);
-    setSelectedPrompts(new Set(defaultSelectedIds));
+    const allValidIds = sortedPrompts.map((p) => p.id);
+    // setSelectedPrompts(new Set(sortedPrompts.filter(p => ["Industry Analysis", "Master Prompt"].includes(p.name)).map(p => p.id)));
+    setSelectedPrompts(new Set(allValidIds));
   };
-
   const toggleCategory = (id: string) => {
     const newSelected = new Set(selectedCategories);
     if (newSelected.has(id)) newSelected.delete(id);
@@ -462,12 +532,12 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
   };
 
   const selectAllPrompts = () => {
-  if (selectedPrompts.size === prompts.length) {
-    setSelectedPrompts(new Set());
-  } else {
-    setSelectedPrompts(new Set(prompts.map((p) => p.id)));
-  }
-};
+    if (selectedPrompts.size === prompts.length && prompts.length > 0) {
+      setSelectedPrompts(new Set());
+    } else {
+      setSelectedPrompts(new Set(prompts.map((p) => p.id)));
+    }
+  };
 
   const checkForDuplicateJob = async () => {
     if (!user) return null;
@@ -648,6 +718,16 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
   };
 
   const generateFacets = async (forceNew = false) => {
+    const REQUIRED_PROMPT_NAMES = ["Industry Analysis", "Master Prompt"];
+    const selectedPromptObjects = prompts.filter(
+      (p) => selectedPrompts.has(p.id) && REQUIRED_PROMPT_NAMES.includes(p.name)
+    );
+    if (selectedPromptObjects.length === 0) {
+      throw new Error(
+        "Critical error: 'Industry Analysis' or 'Master Prompt' must be selected to proceed."
+      );
+    }
+
     if (selectedCategories.size === 0) return;
     if (!forceNew) {
       const duplicateJob = await checkForDuplicateJob();
@@ -682,9 +762,16 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
     setError(null);
     try {
       setValidationError(null);
-      const selectedPromptObjects = prompts.filter((p) =>
-        selectedPrompts.has(p.id)
+      const REQUIRED_PROMPT_NAMES = ["Industry Analysis", "Master Prompt"];
+      const selectedPromptObjects = prompts.filter(
+        (p) =>
+          selectedPrompts.has(p.id) && REQUIRED_PROMPT_NAMES.includes(p.name)
       );
+      if (selectedPromptObjects.length === 0) {
+        throw new Error(
+          "Generation requires 'Industry Analysis' or 'Master Prompt' to be selected."
+        );
+      }
       selectedPromptObjects.sort((a, b) => {
         const nameA = a.name.trim();
         const nameB = b.name.trim();
@@ -1418,37 +1505,38 @@ export default function FacetGeneration({ onComplete }: FacetGenerationProps) {
             </div>
           )}
           <div className="max-h-96 overflow-y-auto space-y-2">
-            {prompts.length>0 ? (
-
-            prompts.map((prompt) => (
-              <div
-                key={prompt.id}
-                className="p-3 hover:bg-slate-50 rounded-lg transition-colors"
-              >
-                <button
-                  onClick={() => togglePrompt(prompt.id)}
-                  className="w-full flex items-center gap-3 text-left"
+            {prompts.length > 0 ? (
+              prompts.map((prompt) => (
+                <div
+                  key={prompt.id}
+                  className="p-3 hover:bg-slate-50 rounded-lg transition-colors"
                 >
-                  {selectedPrompts.has(prompt.id) ? (
-                    <CheckSquare className="w-5 h-5 text-blue-600 flex-shrink-0" />
-                  ) : (
-                    <Square className="w-5 h-5 text-slate-400 flex-shrink-0" />
-                  )}
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-slate-900">
-                      {prompt.name}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Level {prompt.level} • {prompt.type}
-                    </p>
-                  </div>
-                </button>
-              </div>
-            ))
-            ):(
-              <div className="p-8 text-center border-2 border-dashed border-slate-100 rounded-1">
-                <Settings className="w-8 h-8 text-slate-200 mx-auto mb-2"/>
-                <p className="text-sm text-slate-400">No active prompt templates available</p>
+                  <button
+                    onClick={() => togglePrompt(prompt.id)}
+                    className="w-full flex items-center gap-3 text-left"
+                  >
+                    {selectedPrompts.has(prompt.id) ? (
+                      <CheckSquare className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                    ) : (
+                      <Square className="w-5 h-5 text-slate-400 flex-shrink-0" />
+                    )}
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-slate-900">
+                        {prompt.name}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Level {prompt.level} • {prompt.type}
+                      </p>
+                    </div>
+                  </button>
+                </div>
+              ))
+            ) : (
+              <div className="p-8 text-center border-2 border-dashed border-slate-100 rounded-x1">
+                <Settings className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+                <p className="text-sm text-slate-400">
+                  No active prompt templates available
+                </p>
               </div>
             )}
           </div>

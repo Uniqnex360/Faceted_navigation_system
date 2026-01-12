@@ -1,5 +1,13 @@
-import { useState, useEffect, useMemo } from "react"; // 1. Added useMemo
-import { FolderPlus, Trash2, Eye, X, Download } from "lucide-react";
+import { useState, useEffect, useMemo } from "react"; 
+import {
+  Trash2,
+  Eye,
+  X,
+  Download,
+  Search,
+  ChevronRight,
+  ChevronLeft,
+} from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { FacetGenerationJob, RecommendedFacet } from "../types";
@@ -13,6 +21,11 @@ export default function ProjectManagement() {
   const [availableTabs, setAvailableTabs] = useState<string[]>([]);
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
   const [projectName, setProjectName] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [projectSearchQuery, setProjectSearchQuery] = useState("");
+  const [projectCurrentPage, setProjectCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const [selectedFacetIds, setSelectedFacetIds] = useState<Set<string>>(
     new Set()
   );
@@ -41,14 +54,49 @@ export default function ProjectManagement() {
     loadProjects();
   }, [user]);
 
-  // 2. Define filteredFacets using useMemo so it updates when tabs change
   const filteredFacets = useMemo(() => {
     if (!activeTab) return [];
-    return historicalFacets.filter((f: any) =>
-      f.categories?.category_path?.startsWith(activeTab)
-    );
-  }, [historicalFacets, activeTab]);
+    const query = searchQuery.toLowerCase().trim();
 
+    return historicalFacets.filter((f: any) => {
+      const matchesTab = f.categories?.category_path?.startsWith(activeTab);
+      const matchesSearch =
+        !query ||
+        f.facet_name?.toLowerCase().includes(query) ||
+        f.possible_values?.toLowerCase().includes(query) ||
+        f.categories?.name.toLowerCase().includes(query);
+      return matchesTab && matchesSearch;
+    });
+  }, [historicalFacets, activeTab, searchQuery]);
+  const filteredProjects = useMemo(() => {
+    const query = projectSearchQuery.toLowerCase().trim();
+    if (!query) return projects;
+    return projects.filter((project) => {
+      const nameMatch = project.project_name?.toLowerCase().includes(query);
+      const categoryMatch = project.category_ids?.some((id) =>
+        categoryMap[id]?.toLowerCase().includes(query)
+      );
+      const statusMatch = project.status.toLowerCase().includes(query);
+      return nameMatch || categoryMatch || statusMatch;
+    });
+  }, [projects, projectSearchQuery, categoryMap]);
+  const paginatedFacets = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredFacets.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredFacets, currentPage]);
+  const totalPages = Math.ceil(filteredFacets.length / itemsPerPage);
+
+  const paginatedProjects = useMemo(() => {
+    const startIndex = (projectCurrentPage - 1) * itemsPerPage;
+    return filteredProjects.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredProjects, projectCurrentPage]);
+  const totalProjectPages = Math.ceil(filteredProjects.length / itemsPerPage);
+  useEffect(() => {
+    setProjectCurrentPage(1);
+  }, [projectSearchQuery]);
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, searchQuery]);
   const viewProjectDetails = async (project: FacetGenerationJob) => {
     if (!project) return;
     setSelectedProject(project);
@@ -114,14 +162,15 @@ export default function ProjectManagement() {
   };
 
   const toggleSelectAll = () => {
-    const allFilteredSelected =
-      filteredFacets.length > 0 &&
-      filteredFacets.every((f: any) => selectedFacetIds.has(f.id));
+    const allPageSelected =
+      paginatedFacets.length > 0 &&
+      paginatedFacets.every((f: any) => selectedFacetIds.has(f.id));
+
     const newSet = new Set(selectedFacetIds);
-    if (allFilteredSelected) {
-      filteredFacets.forEach((f: any) => newSet.delete(f.id));
+    if (allPageSelected) {
+      paginatedFacets.forEach((f: any) => newSet.delete(f.id));
     } else {
-      filteredFacets.forEach((f: any) => newSet.add(f.id));
+      paginatedFacets.forEach((f: any) => newSet.add(f.id));
     }
     setSelectedFacetIds(newSet);
   };
@@ -296,7 +345,29 @@ export default function ProjectManagement() {
       <h2 className="text-2xl font-bold text-slate-900 mb-6">
         Project Management
       </h2>
-
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search projects by name, category, or status..."
+            className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+            value={projectSearchQuery}
+            onChange={(e) => setProjectSearchQuery(e.target.value)}
+          />
+          {projectSearchQuery && (
+            <button
+              onClick={() => setProjectSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+        <div className="text-sm text-slate-500">
+          {filteredProjects.length} Projects
+        </div>
+      </div>
       {/* <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
         <h3 className="font-semibold text-slate-900 mb-4">
           Create New Project
@@ -345,7 +416,7 @@ export default function ProjectManagement() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
-            {projects.map((project) => (
+            {paginatedProjects.map((project) => (
               <tr key={project.id} className="hover:bg-slate-50">
                 <td className="px-6 py-4">
                   <div className="flex flex-wrap items-center gap-1 px-6 py-4">
@@ -420,6 +491,37 @@ export default function ProjectManagement() {
             )}
           </tbody>
         </table>
+        {totalProjectPages > 1 && (
+          <div className="mt-4 px-6 py-4 bg-white border border-slate-200 rounded-lg flex items-center justify-between shadow-sm">
+            <span className="text-sm text-slate-500">
+              Showing {(projectCurrentPage - 1) * itemsPerPage + 1} to{" "}
+              {Math.min(
+                projectCurrentPage * itemsPerPage,
+                filteredProjects.length
+              )}{" "}
+              of {filteredProjects.length} projects
+            </span>
+            <div className="flex gap-2">
+              <button
+                disabled={projectCurrentPage === 1}
+                onClick={() => setProjectCurrentPage((prev) => prev - 1)}
+                className="p-2 border rounded hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div className="flex items-center px-4 text-sm font-medium text-slate-700 border-x">
+                Page {projectCurrentPage} of {totalProjectPages}
+              </div>
+              <button
+                disabled={projectCurrentPage === totalProjectPages}
+                onClick={() => setProjectCurrentPage((prev) => prev + 1)}
+                className="p-2 border rounded hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {isDetailModalOpen && selectedProject && (
@@ -468,17 +570,17 @@ export default function ProjectManagement() {
               </div>
             </div>
 
-            <div className="p-0 overflow-hidden flex-1 flex flex-col">
+            <div className="p-0 overflow-hidden flex-1 flex flex-col min-h-0">
               {isLoadingDetails ? (
                 <div className="text-center py-20">
                   <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
                   <p className="text-slate-500">Loading...</p>
                 </div>
               ) : (
-                <div className="flex-1 overflow-auto flex flex-col">
+                <div className="flex-1 overflow-hidden flex flex-col">
                   {availableTabs.length > 0 && (
-                    <div className="px-6 pt-4 border-b border-slate-200 bg-white sticky top-0 z-20">
-                      <div className="flex gap-6 overflow-x-auto">
+                    <div className="px-6 pt-4 border-b border-slate-200 bg-white shrink-0">
+                      <div className="flex gap-6 overflow-x-auto no-scrollbar">
                         {availableTabs.map((tab) => (
                           <button
                             key={tab}
@@ -495,153 +597,200 @@ export default function ProjectManagement() {
                       </div>
                     </div>
                   )}
-
-                  {filteredFacets.length > 0 ? (
-                    <table className="w-full text-left border-collapse">
-                      <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
-                        <tr>
-                          {/* 4. Added missing TD checkbox cell */}
-                          <th className="px-4 py-3 w-10 border-b border-slate-200 bg-slate-50">
-                            <input
-                              type="checkbox"
-                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              checked={
-                                filteredFacets.length > 0 &&
-                                filteredFacets.every((f: any) =>
-                                  selectedFacetIds.has(f.id)
-                                )
-                              }
-                              onChange={toggleSelectAll}
-                            />
-                          </th>
-                          {columns.map((col, idx) => (
-                            <th
-                              key={idx}
-                              className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 whitespace-nowrap bg-slate-50"
-                            >
-                              {col}
+                  <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/50 flex items-center gap-4 shrink-0">
+                    <div className="relative flex-1 max-w-md">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search facets,values or categories..."
+                        className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => setSearchQuery("")}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-500 font-medium">
+                      Found {filteredFacets.length} results
+                    </div>
+                  </div>
+                  <div className="flex-1 overflow-auto bg-white">
+                    {filteredFacets.length > 0 ? (
+                      <table className="w-full text-left border-collapse">
+                        <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
+                          <tr>
+                            <th className="px-4 py-3 w-10 border-b border-slate-200 bg-slate-50">
+                              <input
+                                type="checkbox"
+                                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                checked={
+                                  paginatedFacets.length > 0 &&
+                                  paginatedFacets.every((f: any) =>
+                                    selectedFacetIds.has(f.id)
+                                  )
+                                }
+                                onChange={toggleSelectAll}
+                              />
                             </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200 bg-white">
-                        {filteredFacets.map((facet: any) => {
-                          const categoryPath =
-                            facet.categories?.category_path || "N/A";
-                          const categoryName =
-                            facet.categories?.name || "Unknown";
-
-                          return (
-                            <tr key={facet.id} className="hover:bg-slate-50">
-                              {/* 5. Added missing TD for checkbox */}
-                              <td className="px-4 py-4">
-                                <input
-                                  type="checkbox"
-                                  className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                  checked={selectedFacetIds.has(facet.id)}
-                                  onChange={() =>
-                                    toggleFacetSelection(facet.id)
-                                  }
-                                />
-                              </td>
-
-                              <td
-                                className="px-6 py-4 text-sm text-slate-600 max-w-xs truncate"
-                                title={categoryPath}
+                            {columns.map((col, idx) => (
+                              <th
+                                key={idx}
+                                className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 whitespace-nowrap bg-slate-50"
                               >
-                                {facet["Input Taxonomy"] ||
-                                  facet["A. Input Taxonomy"] ||
-                                  categoryPath}
-                              </td>
-                              <td className="px-6 py-4 text-sm text-slate-600">
-                                {facet["End Category (C3)"] ||
-                                  facet["B. End Category (C3)"] ||
-                                  categoryName}
-                              </td>
-                              <td className="px-6 py-4 text-sm font-medium text-slate-900">
-                                {facet.facet_name ||
-                                  facet["Filter Attributes"] ||
-                                  facet["C. Filter Attributes"] ||
-                                  "N/A"}
-                              </td>
-                              <td
-                                className="px-6 py-4 text-sm text-slate-600 max-w-md truncate"
-                                title={facet.possible_values}
-                              >
-                                {facet.possible_values ||
-                                  facet["Possible Values"] ||
-                                  facet["D. Possible Values"] ||
-                                  "N/A"}
-                              </td>
-                              <td className="px-6 py-4 text-sm text-slate-600">
-                                {facet.filling_percentage ||
-                                  facet["Filling Percentage (Approx.)"] ||
-                                  facet["E. Filling Percentage (Approx.)"] ||
-                                  0}
-                                %
-                              </td>
-                              <td className="px-6 py-4">
-                                <span
-                                  className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                    (facet.priority ||
+                                {col}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 bg-white">
+                          {paginatedFacets.map((facet: any) => {
+                            const categoryPath =
+                              facet.categories?.category_path || "N/A";
+                            const categoryName =
+                              facet.categories?.name || "Unknown";
+
+                            return (
+                              <tr key={facet.id} className="hover:bg-slate-50">
+                                <td className="px-4 py-4">
+                                  <input
+                                    type="checkbox"
+                                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                    checked={selectedFacetIds.has(facet.id)}
+                                    onChange={() =>
+                                      toggleFacetSelection(facet.id)
+                                    }
+                                  />
+                                </td>
+
+                                <td
+                                  className="px-6 py-4 text-sm text-slate-600 max-w-xs truncate"
+                                  title={categoryPath}
+                                >
+                                  {facet["Input Taxonomy"] ||
+                                    facet["A. Input Taxonomy"] ||
+                                    categoryPath}
+                                </td>
+                                <td className="px-6 py-4 text-sm text-slate-600">
+                                  {facet["End Category (C3)"] ||
+                                    facet["B. End Category (C3)"] ||
+                                    categoryName}
+                                </td>
+                                <td className="px-6 py-4 text-sm font-medium text-slate-900">
+                                  {facet.facet_name ||
+                                    facet["Filter Attributes"] ||
+                                    facet["C. Filter Attributes"] ||
+                                    "N/A"}
+                                </td>
+                                <td
+                                  className="px-6 py-4 text-sm text-slate-600 max-w-md truncate"
+                                  title={facet.possible_values}
+                                >
+                                  {facet.possible_values ||
+                                    facet["Possible Values"] ||
+                                    facet["D. Possible Values"] ||
+                                    "N/A"}
+                                </td>
+                                <td className="px-6 py-4 text-sm text-slate-600">
+                                  {facet.filling_percentage ||
+                                    facet["Filling Percentage (Approx.)"] ||
+                                    facet["E. Filling Percentage (Approx.)"] ||
+                                    0}
+                                  %
+                                </td>
+                                <td className="px-6 py-4">
+                                  <span
+                                    className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                      (facet.priority ||
+                                        facet[
+                                          "Priority (High / Medium / Low)"
+                                        ] ||
+                                        facet[
+                                          "F. Priority (High / Medium / Low)"
+                                        ]) === "High"
+                                        ? "bg-red-100 text-red-700"
+                                        : (facet.priority ||
+                                            facet[
+                                              "Priority (High / Medium / Low)"
+                                            ] ||
+                                            facet[
+                                              "F. Priority (High / Medium / Low)"
+                                            ]) === "Medium"
+                                        ? "bg-yellow-100 text-yellow-700"
+                                        : "bg-green-100 text-green-700"
+                                    }`}
+                                  >
+                                    {facet.priority ||
                                       facet["Priority (High / Medium / Low)"] ||
                                       facet[
                                         "F. Priority (High / Medium / Low)"
-                                      ]) === "High"
-                                      ? "bg-red-100 text-red-700"
-                                      : (facet.priority ||
-                                          facet[
-                                            "Priority (High / Medium / Low)"
-                                          ] ||
-                                          facet[
-                                            "F. Priority (High / Medium / Low)"
-                                          ]) === "Medium"
-                                      ? "bg-yellow-100 text-yellow-700"
-                                      : "bg-green-100 text-green-700"
-                                  }`}
+                                      ] ||
+                                      "Medium"}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 text-sm text-slate-600">
+                                  {facet.confidence_score ||
+                                    facet["Confidence Score (1–10)"] ||
+                                    facet["G. Confidence Score (1–10)"] ||
+                                    5}
+                                  /10
+                                </td>
+                                <td className="px-6 py-4 text-sm text-slate-600">
+                                  {facet.num_sources ||
+                                    facet["# of available sources"] ||
+                                    facet["H. # of available sources"] ||
+                                    0}
+                                </td>
+                                <td
+                                  className="px-6 py-4 text-sm text-slate-600 max-w-xs truncate"
+                                  title={facet.source_urls}
                                 >
-                                  {facet.priority ||
-                                    facet["Priority (High / Medium / Low)"] ||
-                                    facet[
-                                      "F. Priority (High / Medium / Low)"
-                                    ] ||
-                                    "Medium"}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 text-sm text-slate-600">
-                                {facet.confidence_score ||
-                                  facet["Confidence Score (1–10)"] ||
-                                  facet["G. Confidence Score (1–10)"] ||
-                                  5}
-                                /10
-                              </td>
-                              <td className="px-6 py-4 text-sm text-slate-600">
-                                {facet.num_sources ||
-                                  facet["# of available sources"] ||
-                                  facet["H. # of available sources"] ||
-                                  0}
-                              </td>
-                              <td
-                                className="px-6 py-4 text-sm text-slate-600 max-w-xs truncate"
-                                title={facet.source_urls}
-                              >
-                                {facet.source_urls ||
-                                  facet["Source URLs"] ||
-                                  facet["I. Source URLs"] ||
-                                  "N/A"}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <div className="text-center py-20">
-                      <p className="text-slate-500">
-                        No facets found for this category.
-                      </p>
-                    </div>
-                  )}
+                                  {facet.source_urls ||
+                                    facet["Source URLs"] ||
+                                    facet["I. Source URLs"] ||
+                                    "N/A"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div className="text-center py-20">
+                        <p className="text-slate-500">
+                          No facets found for this category.
+                        </p>
+                      </div>
+                    )}
+                    {totalPages > 1 && (
+                      <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+                        <span className="text-xs text-slate-500 font-medium">
+                          Page {currentPage} of {totalPages}
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            disabled={currentPage === 1}
+                            onClick={() => setCurrentPage((prev) => prev - 1)}
+                            className="p-2 border rounded hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+                          <button
+                            disabled={currentPage === totalPages}
+                            onClick={() => setCurrentPage((prev) => prev + 1)}
+                            className="p-2 border rounded hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
