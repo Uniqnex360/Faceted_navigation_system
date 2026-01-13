@@ -629,22 +629,47 @@ export default function PromptManagement() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-120px)]">
-      {/* 1. STATIC HEADER - shrink-0 ensures this never scrolls */}
       <div className="shrink-0 bg-slate-50 pb-4 border-b border-slate-200">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-bold text-slate-900">
-            Prompt Template Management
-          </h2>
-          {!isEditing && isSuperAdmin && (
-            <button
-              onClick={() => setIsCreateModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
-            >
-              <Plus className="w-5 h-5" />
-              New Prompt
-            </button>
-          )}
-        </div>
+        <div className="flex justify-between items-center mb-6 flex-shrink-0">
+  <h2 className="text-2xl font-bold text-slate-900">
+    Prompt Template Management
+  </h2>
+  <div className="flex items-center gap-2">
+    {!isEditing && isSuperAdmin && (
+      <button
+        onClick={() => setIsCreateModalOpen(true)}
+        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+      >
+        <Plus className="w-4 h-4" />
+        New Prompt
+      </button>
+    )}
+    {isEditing && (
+      <>
+        {hasChanges && (
+          <button
+            onClick={savePromptVersion}
+            disabled={isSaving}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm text-sm"
+          >
+            <Save className="w-4 h-4" />
+            {isSaving ? "Saving..." : "Save New Version"}
+          </button>
+        )}
+        <button
+          onClick={() => {
+            setIsEditing(false);
+            setError(null);
+            setSelectedPrompt(null);
+          }}
+          className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 border border-slate-200 text-sm"
+        >
+          {hasChanges ? "Cancel" : "Close"}
+        </button>
+      </>
+    )}
+  </div>
+</div>
         {isSuperAdmin && !isEditing && (
           <div className="flex items-center gap-4 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
             <label className="text-sm font-semibold text-slate-700 whitespace-nowrap">
@@ -674,32 +699,10 @@ export default function PromptManagement() {
         {isEditing && selectedPrompt ? (
           <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6 shadow-md">
             <div className="flex items-center justify-between border-b pb-4 mb-6">
-               <h3 className="font-semibold text-slate-900 text-lg">
+              <h3 className="font-semibold text-slate-900 text-lg">
                 Edit: {selectedPrompt.name}
               </h3>
-              <div className="flex gap-2">
-                {hasChanges && (
-                  <button
-                    onClick={savePromptVersion}
-                    disabled={isSaving}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-md text-sm"
-        >
-                    <Save className="w-4 h-4" />
-                    {isSaving ? "Saving..." : "Save New Version"}
-                  </button>
-                )}
-
-                <button
-                  onClick={() => {
-                    setIsEditing(false);
-                    setError(null);
-                    setSelectedPrompt(null);
-                  }}
-                   className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 border border-slate-200 text-sm"
-                >
-                  {hasChanges ? "Cancel" : "Close"}
-                </button>
-              </div>
+              
             </div>
             <div className="space-y-4">
               {true && (
